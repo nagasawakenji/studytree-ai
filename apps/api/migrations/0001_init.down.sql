@@ -1,0 +1,6 @@
+-- 0001_init.down.sql
+DROP TABLE IF EXISTS problems;
+DROP TABLE IF EXISTS summaries;
+DROP TABLE IF EXISTS nodes;
+DROP TABLE IF EXISTS books;
+DROP TABLE IF EXISTS users;
