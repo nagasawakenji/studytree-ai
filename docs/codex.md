@@ -26,6 +26,12 @@
    - 最低限 `make dev-api` または `go test ./...` が通る状態で終える。
    - 追加したAPIは `curl` 例で動作確認できるようにする。
 
+6. 依存管理（重要）
+   - Codex Cloud 環境では外部モジュール取得（go get / go mod tidy）が失敗する場合がある。
+   - 新しい外部依存（Go module / npm package）を追加する変更は、原則「依存更新タスク」として分離する。
+   - Go は vendor 運用を前提とし、動作確認は基本 `go test -mod=vendor ./...` を用いる。
+   - 依存を追加・更新した場合は、ローカル（ネット可）で `go mod tidy && go mod vendor` を実行し、`go.sum` と `vendor/` をコミットしてから次タスクへ進む。
+
 ---
 
 ## 1. リポジトリ構成（前提）
@@ -96,7 +102,7 @@ Codexへ依頼する際は、毎回この順で出力させる：
 - 変更ファイル一覧を最初に出す
 
 完了条件:
-- go test ./... が通る（可能な範囲）
+- cd apps/api && GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test -mod=vendor ./... が通る（可能な範囲）
 - 追加APIは curl 例で確認できる
 
 まず最初に:
@@ -120,6 +126,7 @@ Codexへ依頼する際は、毎回この順で出力させる：
 - make dev-api で起動
 - curl -i localhost:8080/api/v1/healthz で {"ok":true} が返る
 - レスポンスヘッダに X-Request-Id が含まれる
+- cd apps/api && GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test -mod=vendor ./...
 ```
 
 ---
