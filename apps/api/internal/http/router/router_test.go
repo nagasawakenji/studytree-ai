@@ -13,7 +13,7 @@ import (
 
 func TestHealthz(t *testing.T) {
 	log := logger.NewJSONLogger(io.Discard)
-	handler := NewRouter(log)
+	handler := NewRouter(log, nil)
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/healthz", nil)
 	response := httptest.NewRecorder()

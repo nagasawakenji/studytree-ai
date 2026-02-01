@@ -29,7 +29,7 @@ func main() {
 	addr := ":" + cfg.Port
 	server := &http.Server{
 		Addr:    addr,
-		Handler: router.NewRouter(log),
+		Handler: router.NewRouter(log, pool),
 	}
 
 	log.Info("server listening", map[string]any{"addr": addr})
