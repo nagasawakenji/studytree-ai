@@ -1,0 +1,192 @@
+
+
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StudyTree Section Summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["v", "sc", "sy", "th", "pt", "pi", "tp", "pf", "rq", "tg"],
+  "properties": {
+    "v": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version. Bump when breaking changes are introduced."
+    },
+    "sc": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Scope: what this node covers. Keep concise to reduce tokens."
+    },
+    "sy": {
+      "type": "object",
+      "description": "Symbol dictionary. Keys are NOTATION strings (prefer LaTeX like \\\\mu, x_i). Use a single canonical notation per concept to prevent symbol mixing.",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 32
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/symbolDef"
+      },
+      "default": {}
+    },
+    "th": {
+      "type": "array",
+      "description": "Theorems / propositions / formulas. Keep items short.",
+      "items": {
+        "$ref": "#/$defs/theorem"
+      },
+      "default": []
+    },
+    "pt": {
+      "type": "array",
+      "description": "Problem types (short strings).",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 160
+      },
+      "default": []
+    },
+    "pi": {
+      "type": "array",
+      "description": "Proof ideas (short strings).",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 160
+      },
+      "default": []
+    },
+    "tp": {
+      "type": "array",
+      "description": "Solution templates (step patterns).",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "default": []
+    },
+    "pf": {
+      "type": "array",
+      "description": "Pitfalls / common mistakes.",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "default": []
+    },
+    "rq": {
+      "type": "array",
+      "description": "Prerequisite node_ids (tree/graph references).",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      },
+      "default": []
+    },
+    "tg": {
+      "type": "array",
+      "description": "Short tags for search/filter.",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 32
+      },
+      "default": []
+    },
+    "x": {
+      "type": "object",
+      "description": "Extension bucket for future fields. Keep small; do not rely on it for core logic.",
+      "additionalProperties": true,
+      "default": {}
+    }
+  },
+  "$defs": {
+    "symbolDef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["k", "d"],
+      "properties": {
+        "k": {
+          "type": "string",
+          "description": "Symbol kind/type. Fixing this early prevents mixing inconsistent notations.",
+          "enum": [
+            "scalar",
+            "vector",
+            "matrix",
+            "tensor",
+            "set",
+            "function",
+            "operator",
+            "rv",
+            "dist",
+            "event",
+            "index",
+            "sequence",
+            "constant",
+            "other"
+          ]
+        },
+        "d": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Definition / meaning. Keep concise."
+        },
+        "c": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Constraints / domain (optional). Example: x\\in\\mathbb{R}^d, n\\ge1."
+        },
+        "u": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Units (optional)."
+        },
+        "ex": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Short usage example (optional)."
+        }
+      }
+    },
+    "theorem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["n", "s", "c"],
+      "properties": {
+        "n": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Name (short)."
+        },
+        "s": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400,
+          "description": "Statement (short)."
+        },
+        "c": {
+          "type": "string",
+          "maxLength": 240,
+          "description": "Conditions / assumptions."
+        },
+        "p": {
+          "type": "string",
+          "maxLength": 240,
+          "description": "Proof idea / derivation sketch (optional)."
+        },
+        "r": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Reference pointer (optional): e.g., book page, equation number."
+        }
+      }
+    }
+  }
+}
