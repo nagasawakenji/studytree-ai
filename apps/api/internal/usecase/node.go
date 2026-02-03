@@ -10,6 +10,8 @@ var (
 	ErrNodeNotFound = errors.New("node not found")
 	// ErrInvalidNodeReorder indicates node_ids do not align with the specified parent/book.
 	ErrInvalidNodeReorder = errors.New("invalid node reorder")
+	// ErrInvalidMoveParent indicates the destination parent is invalid for the move.
+	ErrInvalidMoveParent = errors.New("invalid move parent")
 )
 
 // Node represents a tree node in a book.
@@ -27,6 +29,7 @@ type NodeRepository interface {
 	List(ctx context.Context, userID string, bookID int64, parentID *int64) ([]Node, error)
 	Update(ctx context.Context, userID string, bookID int64, nodeID int64, parentID *int64, orderIndex int) (Node, error)
 	Reorder(ctx context.Context, userID string, bookID int64, parentID *int64, nodeIDs []int64) error
+	MoveSubtree(ctx context.Context, userID string, bookID int64, nodeID int64, dstBookID int64, dstParentID *int64, dstOrderIndex int) (Node, error)
 }
 
 // NodeUsecase handles node operations.
@@ -57,4 +60,9 @@ func (u *NodeUsecase) Update(ctx context.Context, bookID int64, nodeID int64, pa
 // Reorder updates order_index for nodes under the parent.
 func (u *NodeUsecase) Reorder(ctx context.Context, bookID int64, parentID *int64, nodeIDs []int64) error {
 	return u.repo.Reorder(ctx, localUserID, bookID, parentID, nodeIDs)
+}
+
+// MoveSubtree relocates a node and its descendants to another book/parent.
+func (u *NodeUsecase) MoveSubtree(ctx context.Context, bookID int64, nodeID int64, dstBookID int64, dstParentID *int64, dstOrderIndex int) (Node, error) {
+	return u.repo.MoveSubtree(ctx, localUserID, bookID, nodeID, dstBookID, dstParentID, dstOrderIndex)
 }

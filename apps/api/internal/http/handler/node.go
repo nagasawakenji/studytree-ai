@@ -208,6 +208,73 @@ func (h *NodeHandler) Reorder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// Move handles PATCH /books/{book_id}/nodes/{node_id}/move.
+func (h *NodeHandler) Move(w http.ResponseWriter, r *http.Request) {
+	if h.usecase == nil {
+		writeError(w, http.StatusInternalServerError, "node usecase not configured")
+		return
+	}
+
+	bookID, err := parseBookID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid book_id")
+		return
+	}
+
+	nodeID, err := parseNodeID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid node_id")
+		return
+	}
+
+	var req struct {
+		DstBookID     int64  `json:"dst_book_id"`
+		DstParentID   *int64 `json:"dst_parent_id"`
+		DstOrderIndex int    `json:"dst_order_index"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if req.DstBookID == 0 {
+		writeError(w, http.StatusBadRequest, "dst_book_id is required")
+		return
+	}
+	if req.DstOrderIndex < 0 {
+		writeError(w, http.StatusBadRequest, "dst_order_index must be non-negative")
+		return
+	}
+
+	node, err := h.usecase.MoveSubtree(r.Context(), bookID, nodeID, req.DstBookID, req.DstParentID, req.DstOrderIndex)
+	if err != nil {
+		if errors.Is(err, usecase.ErrNodeNotFound) {
+			writeError(w, http.StatusNotFound, "node not found")
+			return
+		}
+		if errors.Is(err, usecase.ErrInvalidMoveParent) {
+			writeError(w, http.StatusBadRequest, "invalid destination parent")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to move node")
+		return
+	}
+
+	resp := struct {
+		ID         int64  `json:"id"`
+		BookID     int64  `json:"book_id"`
+		ParentID   *int64 `json:"parent_id"`
+		OrderIndex int    `json:"order_index"`
+		Title      string `json:"title"`
+	}{
+		ID:         node.ID,
+		BookID:     node.BookID,
+		ParentID:   node.ParentID,
+		OrderIndex: node.OrderIndex,
+		Title:      node.Title,
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func parseBookID(r *http.Request) (int64, error) {
 	return strconv.ParseInt(chi.URLParam(r, "book_id"), 10, 64)
 }
