@@ -106,3 +106,103 @@ func (r *NodeRepository) List(ctx context.Context, userID string, bookID int64, 
 
 	return nodes, nil
 }
+
+// Update modifies parent_id/order_index for a node.
+func (r *NodeRepository) Update(ctx context.Context, userID string, bookID int64, nodeID int64, parentID *int64, orderIndex int) (usecase.Node, error) {
+	if r.pool == nil {
+		return usecase.Node{}, errors.New("database not configured")
+	}
+
+	var node usecase.Node
+	row := r.pool.QueryRow(ctx, `
+		UPDATE nodes
+		SET parent_id = $1, order_index = $2
+		WHERE user_id = $3 AND book_id = $4 AND id = $5
+		RETURNING id, book_id, parent_id, order_index, title
+	`, parentID, orderIndex, userID, bookID, nodeID)
+
+	var parent pgtype.Int8
+	if err := row.Scan(&node.ID, &node.BookID, &parent, &node.OrderIndex, &node.Title); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return usecase.Node{}, usecase.ErrNodeNotFound
+		}
+		return usecase.Node{}, err
+	}
+	if parent.Valid {
+		node.ParentID = &parent.Int64
+	}
+
+	return node, nil
+}
+
+// Reorder resets order_index under a parent in a single transaction.
+func (r *NodeRepository) Reorder(ctx context.Context, userID string, bookID int64, parentID *int64, nodeIDs []int64) error {
+	if r.pool == nil {
+		return errors.New("database not configured")
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if len(nodeIDs) == 0 {
+		return tx.Commit(ctx)
+	}
+
+	seen := make(map[int64]struct{}, len(nodeIDs))
+	for _, id := range nodeIDs {
+		if _, exists := seen[id]; exists {
+			return usecase.ErrInvalidNodeReorder
+		}
+		seen[id] = struct{}{}
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT id, parent_id
+		FROM nodes
+		WHERE user_id = $1 AND book_id = $2 AND id = ANY($3)
+	`, userID, bookID, nodeIDs)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var id int64
+		var parent pgtype.Int8
+		if err := rows.Scan(&id, &parent); err != nil {
+			return err
+		}
+		count++
+		if parentID == nil {
+			if parent.Valid {
+				return usecase.ErrInvalidNodeReorder
+			}
+			continue
+		}
+		if !parent.Valid || parent.Int64 != *parentID {
+			return usecase.ErrInvalidNodeReorder
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if count != len(nodeIDs) {
+		return usecase.ErrInvalidNodeReorder
+	}
+
+	for index, id := range nodeIDs {
+		if _, err := tx.Exec(ctx, `
+			UPDATE nodes
+			SET order_index = $1
+			WHERE user_id = $2 AND book_id = $3 AND id = $4
+		`, index, userID, bookID, id); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
+}

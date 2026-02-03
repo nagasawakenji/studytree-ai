@@ -40,6 +40,8 @@ func NewRouterWithUsecases(log *logger.Logger, bookUsecase *usecase.BookUsecase,
 			r.Route("/{book_id}/nodes", func(r chi.Router) {
 				r.Post("/", nodeHandler.Create)
 				r.Get("/", nodeHandler.List)
+				r.Patch("/{node_id}", nodeHandler.Update)
+				r.Put("/reorder", nodeHandler.Reorder)
 			})
 		})
 	})
