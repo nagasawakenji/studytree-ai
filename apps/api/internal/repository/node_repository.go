@@ -206,3 +206,86 @@ func (r *NodeRepository) Reorder(ctx context.Context, userID string, bookID int6
 
 	return tx.Commit(ctx)
 }
+
+// MoveSubtree relocates a node and its descendants to another book.
+func (r *NodeRepository) MoveSubtree(ctx context.Context, userID string, bookID int64, nodeID int64, dstBookID int64, dstParentID *int64, dstOrderIndex int) (usecase.Node, error) {
+	if r.pool == nil {
+		return usecase.Node{}, errors.New("database not configured")
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return usecase.Node{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var rootID int64
+	if err := tx.QueryRow(ctx, `
+		SELECT id
+		FROM nodes
+		WHERE user_id = $1 AND book_id = $2 AND id = $3
+	`, userID, bookID, nodeID).Scan(&rootID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return usecase.Node{}, usecase.ErrNodeNotFound
+		}
+		return usecase.Node{}, err
+	}
+
+	if dstParentID != nil {
+		var parentID int64
+		if err := tx.QueryRow(ctx, `
+			SELECT id
+			FROM nodes
+			WHERE user_id = $1 AND book_id = $2 AND id = $3
+		`, userID, dstBookID, *dstParentID).Scan(&parentID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return usecase.Node{}, usecase.ErrInvalidMoveParent
+			}
+			return usecase.Node{}, err
+		}
+	}
+
+	_, err = tx.Exec(ctx, `
+		WITH RECURSIVE subtree AS (
+			SELECT id
+			FROM nodes
+			WHERE user_id = $1 AND book_id = $2 AND id = $3
+			UNION ALL
+			SELECT n.id
+			FROM nodes n
+			INNER JOIN subtree s ON n.parent_id = s.id
+			WHERE n.user_id = $1
+		)
+		UPDATE nodes
+		SET book_id = $4
+		WHERE user_id = $1 AND id IN (SELECT id FROM subtree)
+	`, userID, bookID, nodeID, dstBookID)
+	if err != nil {
+		return usecase.Node{}, err
+	}
+
+	var node usecase.Node
+	row := tx.QueryRow(ctx, `
+		UPDATE nodes
+		SET parent_id = $1, order_index = $2, book_id = $3
+		WHERE user_id = $4 AND id = $5
+		RETURNING id, book_id, parent_id, order_index, title
+	`, dstParentID, dstOrderIndex, dstBookID, userID, nodeID)
+
+	var parent pgtype.Int8
+	if err := row.Scan(&node.ID, &node.BookID, &parent, &node.OrderIndex, &node.Title); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return usecase.Node{}, usecase.ErrNodeNotFound
+		}
+		return usecase.Node{}, err
+	}
+	if parent.Valid {
+		node.ParentID = &parent.Int64
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return usecase.Node{}, err
+	}
+
+	return node, nil
+}

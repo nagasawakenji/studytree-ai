@@ -134,6 +134,65 @@ func (f *fakeNodeRepo) Reorder(_ context.Context, _ string, bookID int64, parent
 	return nil
 }
 
+func (f *fakeNodeRepo) MoveSubtree(_ context.Context, _ string, bookID int64, nodeID int64, dstBookID int64, dstParentID *int64, dstOrderIndex int) (usecase.Node, error) {
+	var root *usecase.Node
+	for i := range f.nodes {
+		node := &f.nodes[i]
+		if node.ID == nodeID && node.BookID == bookID {
+			root = node
+			break
+		}
+	}
+	if root == nil {
+		return usecase.Node{}, usecase.ErrNodeNotFound
+	}
+
+	if dstParentID != nil {
+		var parentFound bool
+		for i := range f.nodes {
+			node := &f.nodes[i]
+			if node.ID == *dstParentID && node.BookID == dstBookID {
+				parentFound = true
+				break
+			}
+		}
+		if !parentFound {
+			return usecase.Node{}, usecase.ErrInvalidMoveParent
+		}
+	}
+
+	subtree := map[int64]struct{}{root.ID: {}}
+	changed := true
+	for changed {
+		changed = false
+		for i := range f.nodes {
+			node := &f.nodes[i]
+			if node.ParentID == nil {
+				continue
+			}
+			if _, ok := subtree[*node.ParentID]; ok {
+				if _, exists := subtree[node.ID]; !exists {
+					subtree[node.ID] = struct{}{}
+					changed = true
+				}
+			}
+		}
+	}
+
+	for i := range f.nodes {
+		node := &f.nodes[i]
+		if _, ok := subtree[node.ID]; ok {
+			node.BookID = dstBookID
+		}
+	}
+
+	root.ParentID = dstParentID
+	root.OrderIndex = dstOrderIndex
+	root.BookID = dstBookID
+
+	return *root, nil
+}
+
 func TestBooksAndNodesRoutes(t *testing.T) {
 	log := logger.NewJSONLogger(io.Discard)
 	bookRepo := &fakeBookRepo{}
@@ -465,5 +524,386 @@ func TestReorderNodesUpdatesOrderIndex(t *testing.T) {
 		if node.OrderIndex != i {
 			t.Fatalf("expected order_index %d, got %d", i, node.OrderIndex)
 		}
+	}
+}
+
+func TestMoveRootNodeToAnotherBook(t *testing.T) {
+	log := logger.NewJSONLogger(io.Discard)
+	bookRepo := &fakeBookRepo{}
+	nodeRepo := &fakeNodeRepo{}
+	bookUsecase := usecase.NewBookUsecase(bookRepo)
+	nodeUsecase := usecase.NewNodeUsecase(nodeRepo)
+	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase)
+
+	bookBody, err := json.Marshal(map[string]string{"title": "Book A"})
+	if err != nil {
+		t.Fatalf("marshal book payload: %v", err)
+	}
+	bookRequest := httptest.NewRequest(http.MethodPost, "/api/v1/books", bytes.NewReader(bookBody))
+	bookResponse := httptest.NewRecorder()
+	handler.ServeHTTP(bookResponse, bookRequest)
+	if bookResponse.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, bookResponse.Code)
+	}
+	var bookA struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(bookResponse.Body).Decode(&bookA); err != nil {
+		t.Fatalf("decode book response: %v", err)
+	}
+
+	bookBBody, err := json.Marshal(map[string]string{"title": "Book B"})
+	if err != nil {
+		t.Fatalf("marshal book payload: %v", err)
+	}
+	bookBRequest := httptest.NewRequest(http.MethodPost, "/api/v1/books", bytes.NewReader(bookBBody))
+	bookBResponse := httptest.NewRecorder()
+	handler.ServeHTTP(bookBResponse, bookBRequest)
+	if bookBResponse.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, bookBResponse.Code)
+	}
+	var bookB struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(bookBResponse.Body).Decode(&bookB); err != nil {
+		t.Fatalf("decode book response: %v", err)
+	}
+
+	rootPayload, err := json.Marshal(map[string]any{
+		"parent_id":   nil,
+		"order_index": 0,
+		"title":       "Root",
+	})
+	if err != nil {
+		t.Fatalf("marshal root payload: %v", err)
+	}
+	rootRequest := httptest.NewRequest(http.MethodPost, "/api/v1/books/"+strconv.FormatInt(bookA.ID, 10)+"/nodes", bytes.NewReader(rootPayload))
+	rootResponse := httptest.NewRecorder()
+	handler.ServeHTTP(rootResponse, rootRequest)
+	if rootResponse.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, rootResponse.Code)
+	}
+	var rootNode struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(rootResponse.Body).Decode(&rootNode); err != nil {
+		t.Fatalf("decode root node response: %v", err)
+	}
+
+	childPayload, err := json.Marshal(map[string]any{
+		"parent_id":   rootNode.ID,
+		"order_index": 0,
+		"title":       "Child",
+	})
+	if err != nil {
+		t.Fatalf("marshal child payload: %v", err)
+	}
+	childRequest := httptest.NewRequest(http.MethodPost, "/api/v1/books/"+strconv.FormatInt(bookA.ID, 10)+"/nodes", bytes.NewReader(childPayload))
+	childResponse := httptest.NewRecorder()
+	handler.ServeHTTP(childResponse, childRequest)
+	if childResponse.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, childResponse.Code)
+	}
+	var childNode struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(childResponse.Body).Decode(&childNode); err != nil {
+		t.Fatalf("decode child node response: %v", err)
+	}
+
+	movePayload, err := json.Marshal(map[string]any{
+		"dst_book_id":     bookB.ID,
+		"dst_parent_id":   nil,
+		"dst_order_index": 1,
+	})
+	if err != nil {
+		t.Fatalf("marshal move payload: %v", err)
+	}
+	moveRequest := httptest.NewRequest(http.MethodPatch, "/api/v1/books/"+strconv.FormatInt(bookA.ID, 10)+"/nodes/"+strconv.FormatInt(rootNode.ID, 10)+"/move", bytes.NewReader(movePayload))
+	moveResponse := httptest.NewRecorder()
+	handler.ServeHTTP(moveResponse, moveRequest)
+	if moveResponse.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, moveResponse.Code)
+	}
+
+	listRootRequest := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+strconv.FormatInt(bookB.ID, 10)+"/nodes?parent_id=null", nil)
+	listRootResponse := httptest.NewRecorder()
+	handler.ServeHTTP(listRootResponse, listRootRequest)
+	if listRootResponse.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, listRootResponse.Code)
+	}
+	var rootList []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(listRootResponse.Body).Decode(&rootList); err != nil {
+		t.Fatalf("decode root list response: %v", err)
+	}
+	if len(rootList) != 1 || rootList[0].ID != rootNode.ID {
+		t.Fatalf("expected moved root node, got %+v", rootList)
+	}
+
+	listChildRequest := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+strconv.FormatInt(bookB.ID, 10)+"/nodes?parent_id="+strconv.FormatInt(rootNode.ID, 10), nil)
+	listChildResponse := httptest.NewRecorder()
+	handler.ServeHTTP(listChildResponse, listChildRequest)
+	if listChildResponse.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, listChildResponse.Code)
+	}
+	var childList []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(listChildResponse.Body).Decode(&childList); err != nil {
+		t.Fatalf("decode child list response: %v", err)
+	}
+	if len(childList) != 1 || childList[0].ID != childNode.ID {
+		t.Fatalf("expected moved child node, got %+v", childList)
+	}
+}
+
+func TestMoveNodeUnderDestinationParent(t *testing.T) {
+	log := logger.NewJSONLogger(io.Discard)
+	bookRepo := &fakeBookRepo{}
+	nodeRepo := &fakeNodeRepo{}
+	bookUsecase := usecase.NewBookUsecase(bookRepo)
+	nodeUsecase := usecase.NewNodeUsecase(nodeRepo)
+	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase)
+
+	createBook := func(title string) int64 {
+		body, err := json.Marshal(map[string]string{"title": title})
+		if err != nil {
+			t.Fatalf("marshal book payload: %v", err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/books", bytes.NewReader(body))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("expected status %d, got %d", http.StatusCreated, response.Code)
+		}
+		var book struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&book); err != nil {
+			t.Fatalf("decode book response: %v", err)
+		}
+		return book.ID
+	}
+
+	bookAID := createBook("Book A")
+	bookBID := createBook("Book B")
+
+	createNode := func(bookID int64, parentID *int64, orderIndex int, title string) int64 {
+		payload, err := json.Marshal(map[string]any{
+			"parent_id":   parentID,
+			"order_index": orderIndex,
+			"title":       title,
+		})
+		if err != nil {
+			t.Fatalf("marshal node payload: %v", err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/books/"+strconv.FormatInt(bookID, 10)+"/nodes", bytes.NewReader(payload))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("expected status %d, got %d", http.StatusCreated, response.Code)
+		}
+		var node struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&node); err != nil {
+			t.Fatalf("decode node response: %v", err)
+		}
+		return node.ID
+	}
+
+	rootAID := createNode(bookAID, nil, 0, "Root A")
+	childAID := createNode(bookAID, &rootAID, 0, "Child A")
+	grandchildID := createNode(bookAID, &childAID, 0, "Grandchild A")
+	rootBID := createNode(bookBID, nil, 0, "Root B")
+
+	movePayload, err := json.Marshal(map[string]any{
+		"dst_book_id":     bookBID,
+		"dst_parent_id":   rootBID,
+		"dst_order_index": 2,
+	})
+	if err != nil {
+		t.Fatalf("marshal move payload: %v", err)
+	}
+	moveRequest := httptest.NewRequest(http.MethodPatch, "/api/v1/books/"+strconv.FormatInt(bookAID, 10)+"/nodes/"+strconv.FormatInt(childAID, 10)+"/move", bytes.NewReader(movePayload))
+	moveResponse := httptest.NewRecorder()
+	handler.ServeHTTP(moveResponse, moveRequest)
+	if moveResponse.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, moveResponse.Code)
+	}
+
+	listMovedRequest := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+strconv.FormatInt(bookBID, 10)+"/nodes?parent_id="+strconv.FormatInt(rootBID, 10), nil)
+	listMovedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(listMovedResponse, listMovedRequest)
+	if listMovedResponse.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, listMovedResponse.Code)
+	}
+	var movedList []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(listMovedResponse.Body).Decode(&movedList); err != nil {
+		t.Fatalf("decode moved list response: %v", err)
+	}
+	if len(movedList) != 1 || movedList[0].ID != childAID {
+		t.Fatalf("expected moved child node, got %+v", movedList)
+	}
+
+	listGrandchildRequest := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+strconv.FormatInt(bookBID, 10)+"/nodes?parent_id="+strconv.FormatInt(childAID, 10), nil)
+	listGrandchildResponse := httptest.NewRecorder()
+	handler.ServeHTTP(listGrandchildResponse, listGrandchildRequest)
+	if listGrandchildResponse.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, listGrandchildResponse.Code)
+	}
+	var grandchildList []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(listGrandchildResponse.Body).Decode(&grandchildList); err != nil {
+		t.Fatalf("decode grandchild list response: %v", err)
+	}
+	if len(grandchildList) != 1 || grandchildList[0].ID != grandchildID {
+		t.Fatalf("expected moved grandchild node, got %+v", grandchildList)
+	}
+}
+
+func TestMoveNodeMovesDescendants(t *testing.T) {
+	log := logger.NewJSONLogger(io.Discard)
+	bookRepo := &fakeBookRepo{}
+	nodeRepo := &fakeNodeRepo{}
+	bookUsecase := usecase.NewBookUsecase(bookRepo)
+	nodeUsecase := usecase.NewNodeUsecase(nodeRepo)
+	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase)
+
+	bookBody, err := json.Marshal(map[string]string{"title": "Source"})
+	if err != nil {
+		t.Fatalf("marshal book payload: %v", err)
+	}
+	bookRequest := httptest.NewRequest(http.MethodPost, "/api/v1/books", bytes.NewReader(bookBody))
+	bookResponse := httptest.NewRecorder()
+	handler.ServeHTTP(bookResponse, bookRequest)
+	if bookResponse.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, bookResponse.Code)
+	}
+	var sourceBook struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(bookResponse.Body).Decode(&sourceBook); err != nil {
+		t.Fatalf("decode book response: %v", err)
+	}
+
+	destBody, err := json.Marshal(map[string]string{"title": "Dest"})
+	if err != nil {
+		t.Fatalf("marshal book payload: %v", err)
+	}
+	destRequest := httptest.NewRequest(http.MethodPost, "/api/v1/books", bytes.NewReader(destBody))
+	destResponse := httptest.NewRecorder()
+	handler.ServeHTTP(destResponse, destRequest)
+	if destResponse.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, destResponse.Code)
+	}
+	var destBook struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(destResponse.Body).Decode(&destBook); err != nil {
+		t.Fatalf("decode book response: %v", err)
+	}
+
+	rootID := func() int64 {
+		payload, err := json.Marshal(map[string]any{
+			"parent_id":   nil,
+			"order_index": 0,
+			"title":       "Root",
+		})
+		if err != nil {
+			t.Fatalf("marshal node payload: %v", err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/books/"+strconv.FormatInt(sourceBook.ID, 10)+"/nodes", bytes.NewReader(payload))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("expected status %d, got %d", http.StatusCreated, response.Code)
+		}
+		var node struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&node); err != nil {
+			t.Fatalf("decode node response: %v", err)
+		}
+		return node.ID
+	}()
+
+	childID := func(parentID int64, title string) int64 {
+		payload, err := json.Marshal(map[string]any{
+			"parent_id":   parentID,
+			"order_index": 0,
+			"title":       title,
+		})
+		if err != nil {
+			t.Fatalf("marshal node payload: %v", err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/books/"+strconv.FormatInt(sourceBook.ID, 10)+"/nodes", bytes.NewReader(payload))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("expected status %d, got %d", http.StatusCreated, response.Code)
+		}
+		var node struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&node); err != nil {
+			t.Fatalf("decode node response: %v", err)
+		}
+		return node.ID
+	}
+
+	childAID := childID(rootID, "Child A")
+	childBID := childID(childAID, "Child B")
+
+	movePayload, err := json.Marshal(map[string]any{
+		"dst_book_id":     destBook.ID,
+		"dst_parent_id":   nil,
+		"dst_order_index": 0,
+	})
+	if err != nil {
+		t.Fatalf("marshal move payload: %v", err)
+	}
+	moveRequest := httptest.NewRequest(http.MethodPatch, "/api/v1/books/"+strconv.FormatInt(sourceBook.ID, 10)+"/nodes/"+strconv.FormatInt(rootID, 10)+"/move", bytes.NewReader(movePayload))
+	moveResponse := httptest.NewRecorder()
+	handler.ServeHTTP(moveResponse, moveRequest)
+	if moveResponse.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, moveResponse.Code)
+	}
+
+	listChildRequest := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+strconv.FormatInt(destBook.ID, 10)+"/nodes?parent_id="+strconv.FormatInt(rootID, 10), nil)
+	listChildResponse := httptest.NewRecorder()
+	handler.ServeHTTP(listChildResponse, listChildRequest)
+	if listChildResponse.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, listChildResponse.Code)
+	}
+	var childList []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(listChildResponse.Body).Decode(&childList); err != nil {
+		t.Fatalf("decode child list response: %v", err)
+	}
+	if len(childList) != 1 || childList[0].ID != childAID {
+		t.Fatalf("expected moved child node, got %+v", childList)
+	}
+
+	listGrandchildRequest := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+strconv.FormatInt(destBook.ID, 10)+"/nodes?parent_id="+strconv.FormatInt(childAID, 10), nil)
+	listGrandchildResponse := httptest.NewRecorder()
+	handler.ServeHTTP(listGrandchildResponse, listGrandchildRequest)
+	if listGrandchildResponse.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, listGrandchildResponse.Code)
+	}
+	var grandchildList []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(listGrandchildResponse.Body).Decode(&grandchildList); err != nil {
+		t.Fatalf("decode grandchild list response: %v", err)
+	}
+	if len(grandchildList) != 1 || grandchildList[0].ID != childBID {
+		t.Fatalf("expected moved grandchild node, got %+v", grandchildList)
 	}
 }
