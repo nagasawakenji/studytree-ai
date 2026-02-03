@@ -10,6 +10,23 @@ export type BookNode = {
   order_index?: number | null;
 };
 
+export type ProblemSummary = {
+  problem_id?: string | number;
+  node_id?: string | number;
+  difficulty?: string;
+  format?: string;
+  intent?: string;
+};
+
+export type ProblemDetail = ProblemSummary & {
+  statement?: string;
+  answer?: string;
+  outline?: string | null;
+  hints?: string[];
+  prereq_node_ids?: string[];
+  tags?: string[];
+};
+
 const API_PREFIX = "/api/v1";
 
 type BooksResponse = Book[] | { data?: Book[] };
@@ -80,8 +97,15 @@ async function parseNodesResponse(response: Response): Promise<BookNode[]> {
   return [];
 }
 
-export async function listNodes(bookId: string | number): Promise<BookNode[]> {
-  const response = await fetch(`${API_PREFIX}/books/${bookId}/nodes`, {
+export async function listNodes(
+  bookId: string | number,
+  parentId?: string | number | null,
+): Promise<BookNode[]> {
+  const query =
+    parentId === undefined
+      ? ""
+      : `?parent_id=${parentId === null ? "null" : parentId}`;
+  const response = await fetch(`${API_PREFIX}/books/${bookId}/nodes${query}`, {
     method: "GET",
     headers: {
       Accept: "application/json",
@@ -89,6 +113,37 @@ export async function listNodes(bookId: string | number): Promise<BookNode[]> {
   });
 
   return parseNodesResponse(response);
+}
+
+export async function listAllNodes(
+  bookId: string | number,
+): Promise<BookNode[]> {
+  const allNodes: BookNode[] = [];
+  const queue: Array<string | number> = [];
+
+  const roots = await listNodes(bookId, null);
+  allNodes.push(...roots);
+  for (const node of roots) {
+    if (node.id !== undefined && node.id !== null) {
+      queue.push(node.id);
+    }
+  }
+
+  while (queue.length > 0) {
+    const parentId = queue.shift();
+    if (parentId === undefined) {
+      continue;
+    }
+    const children = await listNodes(bookId, parentId);
+    allNodes.push(...children);
+    for (const child of children) {
+      if (child.id !== undefined && child.id !== null) {
+        queue.push(child.id);
+      }
+    }
+  }
+
+  return allNodes;
 }
 
 export async function createNode(
@@ -103,6 +158,100 @@ export async function createNode(
     },
     body: JSON.stringify(payload),
   });
+
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+
+  return (await response.json()) as BookNode;
+}
+
+type ProblemsResponse = { items?: ProblemSummary[] } | ProblemSummary[];
+
+async function parseProblemsResponse(
+  response: Response,
+): Promise<ProblemSummary[]> {
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+
+  const data = (await response.json()) as ProblemsResponse;
+  if (Array.isArray(data)) {
+    return data;
+  }
+  if (Array.isArray(data.items)) {
+    return data.items;
+  }
+  return [];
+}
+
+export async function listProblems(
+  nodeId: string | number,
+): Promise<ProblemSummary[]> {
+  const response = await fetch(`${API_PREFIX}/nodes/${nodeId}/problems`, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  return parseProblemsResponse(response);
+}
+
+export async function createProblem(
+  nodeId: string | number,
+  payload: { title: string; body: string },
+): Promise<ProblemDetail> {
+  const response = await fetch(`${API_PREFIX}/nodes/${nodeId}/problems`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      difficulty: "basic",
+      format: "short",
+      intent: payload.title,
+      statement: payload.body,
+      answer: "",
+      hints: [],
+      prereq_node_ids: [],
+      tags: [],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+
+  return (await response.json()) as ProblemDetail;
+}
+
+export async function moveSubtree(params: {
+  srcBookId: string | number;
+  nodeId: string | number;
+  dstBookId: string | number;
+  dstParentId?: string | number | null;
+  dstOrderIndex?: number | null;
+}): Promise<BookNode> {
+  const response = await fetch(
+    `${API_PREFIX}/books/${params.srcBookId}/nodes/${params.nodeId}/move`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        dst_book_id: params.dstBookId,
+        dst_parent_id:
+          params.dstParentId === undefined ? null : params.dstParentId,
+        ...(params.dstOrderIndex !== undefined
+          ? { dst_order_index: params.dstOrderIndex }
+          : {}),
+      }),
+    },
+  );
 
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
