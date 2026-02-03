@@ -80,20 +80,30 @@ async function parseNodesResponse(response: Response): Promise<BookNode[]> {
   return [];
 }
 
-export async function listNodes(bookId: string | number): Promise<BookNode[]> {
-  const response = await fetch(`${API_PREFIX}/books/${bookId}/nodes`, {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
+export async function listNodes(
+  bookId: string | number,
+  parentId: BookNode["parent_id"] | "root" = "root",
+): Promise<BookNode[]> {
+  const parentParam =
+    parentId === "root"
+      ? "parent_id=null"
+      : `parent_id=${encodeURIComponent(String(parentId))}`;
+  const response = await fetch(
+    `${API_PREFIX}/books/${bookId}/nodes?${parentParam}`,
+    {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
     },
-  });
+  );
 
   return parseNodesResponse(response);
 }
 
 export async function createNode(
   bookId: string | number,
-  payload: Pick<BookNode, "title" | "parent_id">,
+  payload: Pick<BookNode, "title" | "parent_id" | "order_index">,
 ): Promise<BookNode> {
   const response = await fetch(`${API_PREFIX}/books/${bookId}/nodes`, {
     method: "POST",
@@ -109,4 +119,51 @@ export async function createNode(
   }
 
   return (await response.json()) as BookNode;
+}
+
+export async function patchNode(
+  bookId: string | number,
+  nodeId: string | number,
+  payload: Pick<BookNode, "parent_id" | "order_index">,
+): Promise<BookNode> {
+  const response = await fetch(
+    `${API_PREFIX}/books/${bookId}/nodes/${nodeId}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+
+  return (await response.json()) as BookNode;
+}
+
+export async function reorderNodes(
+  bookId: string | number,
+  parentId: BookNode["parent_id"] | "root",
+  nodeIds: Array<string | number>,
+): Promise<void> {
+  const payload = {
+    parent_id: parentId === "root" ? null : parentId,
+    node_ids: nodeIds,
+  };
+  const response = await fetch(`${API_PREFIX}/books/${bookId}/nodes/reorder`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
 }
