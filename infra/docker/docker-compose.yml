@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: study
       POSTGRES_DB: studytree
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -22,6 +22,8 @@ services:
         condition: service_healthy
     volumes:
       - ${MIGRATIONS_DIR}:/migrations:ro
+    command:
+      [ "-path", "/migrations", "-database", "postgres://study:study@db:5432/studytree?sslmode=disable", "up" ]
 
 volumes:
   pgdata: {}
