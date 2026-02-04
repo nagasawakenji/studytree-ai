@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type DragEvent,
+} from "react";
 
 import {
   createBook,
@@ -17,6 +23,13 @@ import {
 type TreeData = {
   childrenMap: Map<string, BookNode[]>;
   normalizeKey: (value: BookNode["parent_id"]) => string;
+};
+
+type Slot = "primary" | "secondary";
+
+type DragPayload = {
+  nodeId?: string | number;
+  bookId?: string | number;
 };
 
 const buildTreeData = (nodes: BookNode[]): TreeData => {
@@ -50,42 +63,122 @@ const getNodeById = (
   return nodes.find((node) => String(node.id) === String(nodeId));
 };
 
+const getBookById = (
+  books: Book[],
+  bookId: string | number | null,
+): Book | undefined => {
+  if (bookId === null) {
+    return undefined;
+  }
+  return books.find((book) => String(book.id) === String(bookId));
+};
+
+const renderTree = (
+  tree: TreeData,
+  selectedNodeId: string | number | null,
+  bookId: string | number | null,
+  onSelect: (nodeId: string | number) => void,
+  onDrop: (
+    event: DragEvent<HTMLButtonElement | HTMLDivElement>,
+    dstParentId: string | number | null,
+  ) => void,
+): JSX.Element | null => {
+  const renderNodes = (parentKey: string, depth: number): JSX.Element | null => {
+    const children = tree.childrenMap.get(parentKey);
+    if (!children || children.length === 0) {
+      return null;
+    }
+
+    return (
+      <ul className="space-y-2">
+        {children.map((node) => {
+          const nodeKey = node.id ?? `${node.title}-${node.parent_id ?? "root"}`;
+          const childKey = tree.normalizeKey(node.id);
+          const isSelected =
+            selectedNodeId !== null &&
+            String(selectedNodeId) === String(node.id);
+          return (
+            <li key={nodeKey} className="space-y-2">
+              <button
+                className={`w-full rounded-md border px-3 py-2 text-left text-sm shadow-sm transition focus:outline-none focus:ring-2 focus:ring-zinc-400 ${
+                  isSelected
+                    ? "border-zinc-900 bg-zinc-900 text-white"
+                    : "border-zinc-100 bg-white text-zinc-900 hover:bg-zinc-50"
+                }`}
+                style={{ marginLeft: `${depth * 16}px` }}
+                type="button"
+                draggable={Boolean(node.id && bookId)}
+                onDragStart={(event) => {
+                  if (!node.id || !bookId) {
+                    return;
+                  }
+                  event.dataTransfer.setData(
+                    "application/json",
+                    JSON.stringify({ nodeId: node.id, bookId }),
+                  );
+                  event.dataTransfer.effectAllowed = "move";
+                }}
+                onClick={() => {
+                  if (node.id !== undefined && node.id !== null) {
+                    onSelect(node.id);
+                  }
+                }}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => onDrop(event, node.id ?? null)}
+              >
+                <div className="font-medium">{node.title}</div>
+                <div className="text-xs text-zinc-500">id: {node.id ?? "-"}</div>
+              </button>
+              {renderNodes(childKey, depth + 1)}
+            </li>
+          );
+        })}
+      </ul>
+    );
+  };
+
+  return renderNodes("root", 0);
+};
+
 export default function Home() {
   const [books, setBooks] = useState<Book[]>([]);
   const [title, setTitle] = useState("");
   const [booksLoading, setBooksLoading] = useState(false);
   const [booksError, setBooksError] = useState<string | null>(null);
 
-  const [leftBookId, setLeftBookId] = useState<string | number | null>(null);
-  const [rightBookId, setRightBookId] = useState<string | number | null>(null);
-
-  const [leftNodes, setLeftNodes] = useState<BookNode[]>([]);
-  const [leftNodesLoading, setLeftNodesLoading] = useState(false);
-  const [leftNodesError, setLeftNodesError] = useState<string | null>(null);
-  const [leftSelectedNodeId, setLeftSelectedNodeId] = useState<
+  const [primaryBookId, setPrimaryBookId] = useState<string | number | null>(
+    null,
+  );
+  const [secondaryBookId, setSecondaryBookId] = useState<
     string | number | null
   >(null);
 
-  const [rightNodes, setRightNodes] = useState<BookNode[]>([]);
-  const [rightNodesLoading, setRightNodesLoading] = useState(false);
-  const [rightNodesError, setRightNodesError] = useState<string | null>(null);
-  const [rightSelectedNodeId, setRightSelectedNodeId] = useState<
+  const [primaryNodes, setPrimaryNodes] = useState<BookNode[]>([]);
+  const [primaryNodesLoading, setPrimaryNodesLoading] = useState(false);
+  const [primaryNodesError, setPrimaryNodesError] = useState<string | null>(null);
+  const [primarySelectedNodeId, setPrimarySelectedNodeId] = useState<
     string | number | null
   >(null);
 
-  const [leftProblems, setLeftProblems] = useState<ProblemSummary[]>([]);
-  const [leftProblemsLoading, setLeftProblemsLoading] = useState(false);
-  const [leftProblemsError, setLeftProblemsError] = useState<string | null>(null);
-  const [leftProblemTitle, setLeftProblemTitle] = useState("");
-  const [leftProblemBody, setLeftProblemBody] = useState("");
-  const [leftProblemSaving, setLeftProblemSaving] = useState(false);
+  const [secondaryNodes, setSecondaryNodes] = useState<BookNode[]>([]);
+  const [secondaryNodesLoading, setSecondaryNodesLoading] = useState(false);
+  const [secondaryNodesError, setSecondaryNodesError] = useState<
+    string | null
+  >(null);
+  const [secondarySelectedNodeId, setSecondarySelectedNodeId] = useState<
+    string | number | null
+  >(null);
 
-  const [rightProblems, setRightProblems] = useState<ProblemSummary[]>([]);
-  const [rightProblemsLoading, setRightProblemsLoading] = useState(false);
-  const [rightProblemsError, setRightProblemsError] = useState<string | null>(null);
-  const [rightProblemTitle, setRightProblemTitle] = useState("");
-  const [rightProblemBody, setRightProblemBody] = useState("");
-  const [rightProblemSaving, setRightProblemSaving] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [activeNodeId, setActiveNodeId] = useState<string | number | null>(null);
+  const [activeSlot, setActiveSlot] = useState<Slot | null>(null);
+
+  const [problems, setProblems] = useState<ProblemSummary[]>([]);
+  const [problemsLoading, setProblemsLoading] = useState(false);
+  const [problemsError, setProblemsError] = useState<string | null>(null);
+  const [problemTitle, setProblemTitle] = useState("");
+  const [problemBody, setProblemBody] = useState("");
+  const [problemSaving, setProblemSaving] = useState(false);
 
   const loadBooks = useCallback(async () => {
     setBooksError(null);
@@ -122,124 +215,109 @@ export default function Home() {
     }
   };
 
-  const loadLeftNodes = useCallback(async (bookId: string | number) => {
-    setLeftNodesError(null);
-    setLeftNodesLoading(true);
-    try {
-      const data = await listAllNodes(bookId);
-      setLeftNodes(data);
-    } catch (err) {
-      setLeftNodesError(
-        err instanceof Error ? err.message : "Failed to load nodes",
-      );
-    } finally {
-      setLeftNodesLoading(false);
+  const loadNodes = useCallback(async (bookId: string | number, slot: Slot) => {
+    if (slot === "primary") {
+      setPrimaryNodesError(null);
+      setPrimaryNodesLoading(true);
+    } else {
+      setSecondaryNodesError(null);
+      setSecondaryNodesLoading(true);
     }
-  }, []);
 
-  const loadRightNodes = useCallback(async (bookId: string | number) => {
-    setRightNodesError(null);
-    setRightNodesLoading(true);
     try {
       const data = await listAllNodes(bookId);
-      setRightNodes(data);
+      if (slot === "primary") {
+        setPrimaryNodes(data);
+      } else {
+        setSecondaryNodes(data);
+      }
     } catch (err) {
-      setRightNodesError(
-        err instanceof Error ? err.message : "Failed to load nodes",
-      );
+      const message = err instanceof Error ? err.message : "Failed to load nodes";
+      if (slot === "primary") {
+        setPrimaryNodesError(message);
+      } else {
+        setSecondaryNodesError(message);
+      }
     } finally {
-      setRightNodesLoading(false);
+      if (slot === "primary") {
+        setPrimaryNodesLoading(false);
+      } else {
+        setSecondaryNodesLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    if (leftBookId === null) {
-      setLeftNodes([]);
-      setLeftSelectedNodeId(null);
-      setLeftProblems([]);
-      setLeftProblemTitle("");
-      setLeftProblemBody("");
+    if (primaryBookId === null) {
+      setPrimaryNodes([]);
+      setPrimarySelectedNodeId(null);
       return;
     }
 
-    void loadLeftNodes(leftBookId);
-  }, [leftBookId, loadLeftNodes]);
+    void loadNodes(primaryBookId, "primary");
+  }, [primaryBookId, loadNodes]);
 
   useEffect(() => {
-    if (rightBookId === null) {
-      setRightNodes([]);
-      setRightSelectedNodeId(null);
-      setRightProblems([]);
-      setRightProblemTitle("");
-      setRightProblemBody("");
+    if (secondaryBookId === null) {
+      setSecondaryNodes([]);
+      setSecondarySelectedNodeId(null);
       return;
     }
 
-    void loadRightNodes(rightBookId);
-  }, [rightBookId, loadRightNodes]);
+    void loadNodes(secondaryBookId, "secondary");
+  }, [secondaryBookId, loadNodes]);
 
-  const loadLeftProblems = useCallback(async (nodeId: string | number) => {
-    setLeftProblemsError(null);
-    setLeftProblemsLoading(true);
+  const loadProblems = useCallback(async (nodeId: string | number) => {
+    setProblemsError(null);
+    setProblemsLoading(true);
     try {
       const data = await listProblems(nodeId);
-      setLeftProblems(data);
+      setProblems(data);
     } catch (err) {
-      setLeftProblemsError(
+      setProblemsError(
         err instanceof Error ? err.message : "Failed to load problems",
       );
     } finally {
-      setLeftProblemsLoading(false);
-    }
-  }, []);
-
-  const loadRightProblems = useCallback(async (nodeId: string | number) => {
-    setRightProblemsError(null);
-    setRightProblemsLoading(true);
-    try {
-      const data = await listProblems(nodeId);
-      setRightProblems(data);
-    } catch (err) {
-      setRightProblemsError(
-        err instanceof Error ? err.message : "Failed to load problems",
-      );
-    } finally {
-      setRightProblemsLoading(false);
+      setProblemsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (!leftSelectedNodeId) {
-      setLeftProblems([]);
-      setLeftProblemTitle("");
-      setLeftProblemBody("");
+    if (!modalOpen || !activeNodeId) {
       return;
     }
 
-    void loadLeftProblems(leftSelectedNodeId);
-  }, [leftSelectedNodeId, loadLeftProblems]);
+    void loadProblems(activeNodeId);
+  }, [activeNodeId, loadProblems, modalOpen]);
 
   useEffect(() => {
-    if (!rightSelectedNodeId) {
-      setRightProblems([]);
-      setRightProblemTitle("");
-      setRightProblemBody("");
+    if (!modalOpen) {
       return;
     }
 
-    void loadRightProblems(rightSelectedNodeId);
-  }, [rightSelectedNodeId, loadRightProblems]);
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setModalOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [modalOpen]);
 
   const refreshBookNodes = useCallback(
     async (bookId: string | number) => {
-      if (leftBookId !== null && String(bookId) === String(leftBookId)) {
-        await loadLeftNodes(leftBookId);
+      if (primaryBookId !== null && String(bookId) === String(primaryBookId)) {
+        await loadNodes(primaryBookId, "primary");
       }
-      if (rightBookId !== null && String(bookId) === String(rightBookId)) {
-        await loadRightNodes(rightBookId);
+      if (
+        secondaryBookId !== null &&
+        String(bookId) === String(secondaryBookId)
+      ) {
+        await loadNodes(secondaryBookId, "secondary");
       }
     },
-    [leftBookId, loadLeftNodes, loadRightNodes, rightBookId],
+    [loadNodes, primaryBookId, secondaryBookId],
   );
 
   const handleDropNode = useCallback(
@@ -258,18 +336,23 @@ export default function Home() {
         return;
       }
 
-      let parsed: { nodeId?: string | number; bookId?: string | number } = {};
+      let parsed: DragPayload = {};
       try {
-        parsed = JSON.parse(raw) as {
-          nodeId?: string | number;
-          bookId?: string | number;
-        };
+        parsed = JSON.parse(raw) as DragPayload;
       } catch (err) {
         setError(err instanceof Error ? err.message : "Invalid drag data");
         return;
       }
 
       if (!parsed.nodeId || !parsed.bookId) {
+        return;
+      }
+
+      if (
+        String(parsed.bookId) === String(dstBookId) &&
+        String(parsed.nodeId) === String(dstParentId)
+      ) {
+        setError("Cannot move a node onto itself.");
         return;
       }
 
@@ -286,563 +369,440 @@ export default function Home() {
           refreshBookNodes(dstBookId),
         ]);
         if (
-          leftBookId !== null &&
-          String(parsed.bookId) === String(leftBookId) &&
-          String(leftSelectedNodeId) === String(parsed.nodeId)
+          primaryBookId !== null &&
+          String(parsed.bookId) === String(primaryBookId) &&
+          String(primarySelectedNodeId) === String(parsed.nodeId)
         ) {
-          setLeftSelectedNodeId(null);
+          setPrimarySelectedNodeId(null);
         }
         if (
-          rightBookId !== null &&
-          String(parsed.bookId) === String(rightBookId) &&
-          String(rightSelectedNodeId) === String(parsed.nodeId)
+          secondaryBookId !== null &&
+          String(parsed.bookId) === String(secondaryBookId) &&
+          String(secondarySelectedNodeId) === String(parsed.nodeId)
         ) {
-          setRightSelectedNodeId(null);
+          setSecondarySelectedNodeId(null);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to move node");
+        await Promise.all([
+          refreshBookNodes(parsed.bookId),
+          refreshBookNodes(dstBookId),
+        ]);
       }
     },
     [
-      leftBookId,
-      leftSelectedNodeId,
+      primaryBookId,
+      primarySelectedNodeId,
       refreshBookNodes,
-      rightBookId,
-      rightSelectedNodeId,
+      secondaryBookId,
+      secondarySelectedNodeId,
     ],
   );
 
-  const leftTree = useMemo(() => buildTreeData(leftNodes), [leftNodes]);
-  const rightTree = useMemo(() => buildTreeData(rightNodes), [rightNodes]);
+  const primaryTree = useMemo(() => buildTreeData(primaryNodes), [primaryNodes]);
+  const secondaryTree = useMemo(
+    () => buildTreeData(secondaryNodes),
+    [secondaryNodes],
+  );
 
-  const handleProblemSubmit = useCallback(
-    async (
-      nodeId: string | number | null,
-      titleValue: string,
-      bodyValue: string,
-      setSaving: (value: boolean) => void,
-      reset: () => void,
-      setError: (value: string | null) => void,
-      reload: (nodeId: string | number) => Promise<void>,
-    ) => {
-      if (!nodeId || !titleValue.trim() || !bodyValue.trim()) {
-        return;
-      }
-
-      setSaving(true);
-      setError(null);
-      try {
-        await createProblem(nodeId, {
-          title: titleValue.trim(),
-          body: bodyValue.trim(),
-        });
-        reset();
-        await reload(nodeId);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to add problem");
-      } finally {
-        setSaving(false);
-      }
+  const openProblemsModal = useCallback(
+    (slot: Slot, nodeId: string | number) => {
+      setActiveSlot(slot);
+      setActiveNodeId(nodeId);
+      setModalOpen(true);
+      setProblems([]);
+      setProblemsError(null);
+      setProblemTitle("");
+      setProblemBody("");
     },
     [],
   );
 
-  const renderTree = (
-    tree: TreeData,
-    selectedNodeId: string | number | null,
-    onSelect: (nodeId: string | number) => void,
-    bookId: string | number | null,
-    onDrop: (
-      event: DragEvent<HTMLButtonElement | HTMLDivElement>,
-      dstParentId: string | number | null,
-      setError: (value: string | null) => void,
-    ) => void,
-    setError: (value: string | null) => void,
-  ): JSX.Element | null => {
-    const renderNodes = (parentKey: string, depth: number): JSX.Element | null => {
-      const children = tree.childrenMap.get(parentKey);
-      if (!children || children.length === 0) {
-        return null;
-      }
+  const handleProblemSubmit = useCallback(async () => {
+    if (!activeNodeId || !problemTitle.trim() || !problemBody.trim()) {
+      return;
+    }
 
-      return (
-        <ul className="space-y-2">
-          {children.map((node) => {
-            const nodeKey =
-              node.id ?? `${node.title}-${node.parent_id ?? "root"}`;
-            const childKey = tree.normalizeKey(node.id);
-            const isSelected =
-              selectedNodeId !== null &&
-              String(selectedNodeId) === String(node.id);
-            return (
-              <li key={nodeKey} className="space-y-2">
-                <button
-                  className={`w-full rounded-md border px-3 py-2 text-left text-sm shadow-sm transition focus:outline-none focus:ring-2 focus:ring-zinc-400 ${
-                    isSelected
-                      ? "border-zinc-900 bg-zinc-900 text-white"
-                      : "border-zinc-100 bg-white text-zinc-900 hover:bg-zinc-50"
-                  }`}
-                  style={{ marginLeft: `${depth * 16}px` }}
-                  type="button"
-                  draggable={Boolean(node.id && bookId)}
-                  onDragStart={(event) => {
-                    if (!node.id || !bookId) {
-                      return;
-                    }
-                    event.dataTransfer.setData(
-                      "application/json",
-                      JSON.stringify({ nodeId: node.id, bookId }),
-                    );
-                    event.dataTransfer.effectAllowed = "move";
-                  }}
-                  onClick={() => {
-                    if (node.id !== undefined && node.id !== null) {
-                      onSelect(node.id);
-                    }
-                  }}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => onDrop(event, node.id ?? null, setError)}
-                >
-                  <div className="font-medium">{node.title}</div>
-                  <div className="text-xs text-zinc-500">id: {node.id ?? "-"}</div>
-                </button>
-                {renderNodes(childKey, depth + 1)}
-              </li>
-            );
-          })}
-        </ul>
+    setProblemSaving(true);
+    setProblemsError(null);
+    try {
+      await createProblem(activeNodeId, {
+        title: problemTitle.trim(),
+        body: problemBody.trim(),
+      });
+      setProblemTitle("");
+      setProblemBody("");
+      await loadProblems(activeNodeId);
+    } catch (err) {
+      setProblemsError(
+        err instanceof Error ? err.message : "Failed to add problem",
       );
-    };
+    } finally {
+      setProblemSaving(false);
+    }
+  }, [activeNodeId, loadProblems, problemBody, problemTitle]);
 
-    return renderNodes("root", 0);
-  };
+  const primaryBook = getBookById(books, primaryBookId);
+  const secondaryBook = getBookById(books, secondaryBookId);
+  const activeNodes =
+    activeSlot === "primary" ? primaryNodes : activeSlot === "secondary" ? secondaryNodes : [];
+  const activeNode = getNodeById(activeNodes, activeNodeId);
 
   return (
-    <div className="min-h-screen bg-zinc-50 px-6 py-12 text-zinc-900">
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 rounded-2xl bg-white p-8 shadow-sm">
-        <header className="space-y-2">
-          <h1 className="text-2xl font-semibold">Dual Book Trees</h1>
-          <p className="text-sm text-zinc-500">
-            Pick books on the left and right to browse nodes and problems.
-          </p>
-        </header>
+    <div className="flex min-h-screen bg-zinc-950 text-zinc-100">
+      <aside className="flex w-full max-w-xs flex-col border-r border-zinc-800 bg-zinc-900 p-6">
+        <div className="space-y-1">
+          <h1 className="text-lg font-semibold">StudyTree</h1>
+          <p className="text-xs text-zinc-400">Notes + dual trees</p>
+        </div>
 
-        <section className="space-y-3 rounded-lg border border-zinc-100 bg-zinc-50 p-4">
-          <h2 className="text-sm font-semibold text-zinc-600">Create a book</h2>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <input
-              id="book-title"
-              className="w-full flex-1 rounded-lg border border-zinc-200 px-4 py-2 text-sm focus:border-zinc-400 focus:outline-none"
-              placeholder="Type a title..."
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-            />
+        <div className="mt-6 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+              Books
+            </h2>
             <button
-              className="rounded-lg bg-zinc-900 px-5 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:bg-zinc-400"
-              onClick={handleCreate}
-              disabled={booksLoading || !title.trim()}
+              className="text-xs text-zinc-400 underline"
               type="button"
+              onClick={() => void loadBooks()}
             >
-              {booksLoading ? "Creating..." : "Create"}
+              Refresh
             </button>
           </div>
-          {booksError ? <p className="text-sm text-red-600">{booksError}</p> : null}
-        </section>
-
-        <div className="grid gap-6 lg:grid-cols-2">
-          <section className="space-y-4 rounded-xl border border-zinc-100 bg-zinc-50 p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-zinc-900">Left book</h2>
-                <p className="text-xs text-zinc-500">
-                  Drag a chapter to the right book to move it.
-                </p>
-              </div>
-              <button
-                className="text-xs text-zinc-500 underline"
-                type="button"
-                onClick={() => void loadBooks()}
-              >
-                Refresh books
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-zinc-600" htmlFor="left-book">
-                Select book
-              </label>
-              <select
-                id="left-book"
-                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
-                value={leftBookId === null ? "" : String(leftBookId)}
-                onChange={(event) =>
-                  setLeftBookId(event.target.value ? event.target.value : null)
-                }
-                disabled={booksLoading}
-              >
-                <option value="">Select a book...</option>
-                {books.map((book, index) => (
-                  <option
-                    key={book.id ?? `${book.title}-${index}`}
-                    value={book.id ?? `${book.title}-${index}`}
+          {booksLoading ? (
+            <p className="text-xs text-zinc-400">Loading books...</p>
+          ) : null}
+          {booksError ? (
+            <p className="text-xs text-red-400">{booksError}</p>
+          ) : null}
+          <div className="space-y-2">
+            {books.map((book, index) => {
+              const isPrimary =
+                primaryBookId !== null &&
+                String(primaryBookId) === String(book.id);
+              const isSecondary =
+                secondaryBookId !== null &&
+                String(secondaryBookId) === String(book.id);
+              return (
+                <div
+                  key={book.id ?? `${book.title}-${index}`}
+                  className={`rounded-md border px-3 py-2 text-sm ${
+                    isPrimary || isSecondary
+                      ? "border-zinc-500 bg-zinc-800"
+                      : "border-zinc-800 bg-zinc-900"
+                  }`}
+                >
+                  <button
+                    className="w-full text-left font-medium text-zinc-100"
+                    type="button"
+                    onClick={() => setPrimaryBookId(book.id ?? null)}
                   >
                     {book.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-[1.2fr_1fr]">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-zinc-600">Nodes</h3>
-                  {leftBookId ? (
+                  </button>
+                  <p className="text-xs text-zinc-500">id: {book.id ?? "-"}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
                     <button
-                      className="text-xs text-zinc-500 underline"
+                      className="rounded bg-zinc-700 px-2 py-1 text-xs text-zinc-100"
                       type="button"
-                      onClick={() => leftBookId && void loadLeftNodes(leftBookId)}
+                      onClick={() => setPrimaryBookId(book.id ?? null)}
                     >
-                      Refresh nodes
+                      Primary
                     </button>
-                  ) : null}
+                    <button
+                      className="rounded bg-zinc-700 px-2 py-1 text-xs text-zinc-100"
+                      type="button"
+                      onClick={() => setSecondaryBookId(book.id ?? null)}
+                    >
+                      Secondary
+                    </button>
+                    {(isPrimary || isSecondary) && (
+                      <button
+                        className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
+                        type="button"
+                        onClick={() => {
+                          if (isPrimary) {
+                            setPrimaryBookId(null);
+                          }
+                          if (isSecondary) {
+                            setSecondaryBookId(null);
+                          }
+                        }}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div
-                  className="rounded-lg border border-dashed border-zinc-300 bg-white p-3 text-xs text-zinc-500"
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) =>
-                    handleDropNode(event, leftBookId, null, setLeftNodesError)
-                  }
-                >
-                  Drop here to move to root
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="mt-6 space-y-2 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+            New note
+          </h2>
+          <input
+            className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500"
+            placeholder="Type a title..."
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+          />
+          <button
+            className="rounded-md bg-white px-3 py-2 text-sm font-medium text-zinc-900 disabled:cursor-not-allowed disabled:bg-zinc-400"
+            type="button"
+            onClick={handleCreate}
+            disabled={booksLoading || !title.trim()}
+          >
+            {booksLoading ? "Creating..." : "Create"}
+          </button>
+        </div>
+
+        <div className="mt-6 space-y-2 text-xs text-zinc-400">
+          <p>
+            Primary:{" "}
+            <span className="text-zinc-200">
+              {primaryBook?.title ?? "None"}
+            </span>
+          </p>
+          <p>
+            Secondary:{" "}
+            <span className="text-zinc-200">
+              {secondaryBook?.title ?? "None"}
+            </span>
+          </p>
+        </div>
+      </aside>
+
+      <main className="flex-1 bg-zinc-50 p-8 text-zinc-900">
+        <div className="mx-auto flex h-full max-w-6xl flex-col gap-6">
+          <header className="space-y-1">
+            <h2 className="text-2xl font-semibold">Dual Book Trees</h2>
+            <p className="text-sm text-zinc-500">
+              Drag a node across books to reparent. Click a node to open
+              problems instantly.
+            </p>
+          </header>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <section className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold">Primary tree</h3>
+                  <p className="text-xs text-zinc-500">
+                    {primaryBook?.title ?? "Select a book"}
+                  </p>
                 </div>
-                <div className="rounded-lg border border-zinc-100 bg-white p-4 text-sm">
-                  {leftBookId === null ? (
-                    <p className="text-zinc-500">Select a book to view nodes.</p>
-                  ) : leftNodesLoading && leftNodes.length === 0 ? (
-                    <p className="text-zinc-500">Loading nodes...</p>
-                  ) : leftNodes.length === 0 ? (
-                    <p className="text-zinc-500">No nodes yet.</p>
-                  ) : (
-                    renderTree(
-                      leftTree,
-                      leftSelectedNodeId,
-                      setLeftSelectedNodeId,
-                      leftBookId,
-                      (event, dstParentId, setError) =>
-                        handleDropNode(
-                          event,
-                          leftBookId,
-                          dstParentId,
-                          setError,
-                        ),
-                      setLeftNodesError,
-                    )
-                  )}
-                </div>
-                {leftNodesError ? (
-                  <p className="text-sm text-red-600">{leftNodesError}</p>
+                {primaryBookId ? (
+                  <button
+                    className="text-xs text-zinc-500 underline"
+                    type="button"
+                    onClick={() =>
+                      primaryBookId && void loadNodes(primaryBookId, "primary")
+                    }
+                  >
+                    Refresh nodes
+                  </button>
                 ) : null}
               </div>
 
-              <div className="space-y-3 rounded-lg border border-zinc-100 bg-white p-4">
-                <h3 className="text-sm font-semibold text-zinc-600">Problems</h3>
-                {leftBookId === null ? (
-                  <p className="text-sm text-zinc-500">
-                    Select a book to view problems.
-                  </p>
-                ) : leftSelectedNodeId === null ? (
-                  <p className="text-sm text-zinc-500">
-                    Select a chapter to load problems.
-                  </p>
+              <div
+                className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-3 text-xs text-zinc-500"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) =>
+                  handleDropNode(event, primaryBookId, null, setPrimaryNodesError)
+                }
+              >
+                Root drop area
+              </div>
+
+              <div className="min-h-[320px] rounded-lg border border-zinc-100 bg-zinc-50 p-4 text-sm">
+                {primaryBookId === null ? (
+                  <p className="text-zinc-500">Select a book to view nodes.</p>
+                ) : primaryNodesLoading && primaryNodes.length === 0 ? (
+                  <p className="text-zinc-500">Loading nodes...</p>
+                ) : primaryNodes.length === 0 ? (
+                  <p className="text-zinc-500">No nodes yet.</p>
                 ) : (
-                  <>
-                    <div className="space-y-1">
-                      <p className="text-xs text-zinc-500">Selected node</p>
-                      <p className="text-sm font-medium text-zinc-900">
-                        {getNodeById(leftNodes, leftSelectedNodeId)?.title ??
-                          "Untitled"}
-                        <span className="ml-2 text-xs text-zinc-500">
-                          id: {leftSelectedNodeId}
-                        </span>
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <h4 className="text-xs font-semibold text-zinc-600">
-                        Existing problems
-                      </h4>
-                      {leftProblemsLoading ? (
-                        <p className="text-xs text-zinc-500">Loading problems...</p>
-                      ) : leftProblems.length === 0 ? (
-                        <p className="text-xs text-zinc-500">No problems yet.</p>
-                      ) : (
-                        <ul className="space-y-2">
-                          {leftProblems.map((problem, index) => (
-                            <li
-                              key={problem.problem_id ?? `problem-${index}`}
-                              className="rounded-md border border-zinc-100 bg-zinc-50 px-3 py-2"
-                            >
-                              <p className="text-sm font-medium text-zinc-900">
-                                {problem.intent ?? "Untitled problem"}
-                              </p>
-                              <p className="text-xs text-zinc-500">
-                                id: {problem.problem_id ?? "-"} ·
-                                {problem.format ?? "format"} ·
-                                {problem.difficulty ?? "difficulty"}
-                              </p>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      {leftProblemsError ? (
-                        <p className="text-xs text-red-600">{leftProblemsError}</p>
-                      ) : null}
-                    </div>
-                    <div className="space-y-2">
-                      <h4 className="text-xs font-semibold text-zinc-600">
-                        Add problem
-                      </h4>
-                      <input
-                        className="w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
-                        placeholder="Problem title"
-                        value={leftProblemTitle}
-                        onChange={(event) => setLeftProblemTitle(event.target.value)}
-                      />
-                      <textarea
-                        className="min-h-[120px] w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
-                        placeholder="Problem body"
-                        value={leftProblemBody}
-                        onChange={(event) => setLeftProblemBody(event.target.value)}
-                      />
-                      <button
-                        className="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
-                        type="button"
-                        onClick={() =>
-                          void handleProblemSubmit(
-                            leftSelectedNodeId,
-                            leftProblemTitle,
-                            leftProblemBody,
-                            setLeftProblemSaving,
-                            () => {
-                              setLeftProblemTitle("");
-                              setLeftProblemBody("");
-                            },
-                            setLeftProblemsError,
-                            loadLeftProblems,
-                          )
-                        }
-                        disabled={
-                          leftProblemSaving ||
-                          !leftProblemTitle.trim() ||
-                          !leftProblemBody.trim()
-                        }
-                      >
-                        {leftProblemSaving ? "Saving..." : "Add problem"}
-                      </button>
-                    </div>
-                  </>
+                  renderTree(
+                    primaryTree,
+                    primarySelectedNodeId,
+                    primaryBookId,
+                    (nodeId) => {
+                      setPrimarySelectedNodeId(nodeId);
+                      openProblemsModal("primary", nodeId);
+                    },
+                    (event, dstParentId) =>
+                      handleDropNode(
+                        event,
+                        primaryBookId,
+                        dstParentId,
+                        setPrimaryNodesError,
+                      ),
+                  )
                 )}
               </div>
-            </div>
-          </section>
+              {primaryNodesError ? (
+                <p className="text-xs text-red-600">{primaryNodesError}</p>
+              ) : null}
+            </section>
 
-          <section className="space-y-4 rounded-xl border border-zinc-100 bg-zinc-50 p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-zinc-900">Right book</h2>
-                <p className="text-xs text-zinc-500">
-                  Drop a chapter here to reparent across books.
-                </p>
-              </div>
-              <button
-                className="text-xs text-zinc-500 underline"
-                type="button"
-                onClick={() => void loadBooks()}
-              >
-                Refresh books
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-zinc-600" htmlFor="right-book">
-                Select book
-              </label>
-              <select
-                id="right-book"
-                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
-                value={rightBookId === null ? "" : String(rightBookId)}
-                onChange={(event) =>
-                  setRightBookId(event.target.value ? event.target.value : null)
-                }
-                disabled={booksLoading}
-              >
-                <option value="">Select a book...</option>
-                {books.map((book, index) => (
-                  <option
-                    key={book.id ?? `${book.title}-${index}`}
-                    value={book.id ?? `${book.title}-${index}`}
+            <section className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold">Secondary tree</h3>
+                  <p className="text-xs text-zinc-500">
+                    {secondaryBook?.title ?? "Select a book"}
+                  </p>
+                </div>
+                {secondaryBookId ? (
+                  <button
+                    className="text-xs text-zinc-500 underline"
+                    type="button"
+                    onClick={() =>
+                      secondaryBookId &&
+                      void loadNodes(secondaryBookId, "secondary")
+                    }
                   >
-                    {book.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-[1.2fr_1fr]">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-zinc-600">Nodes</h3>
-                  {rightBookId ? (
-                    <button
-                      className="text-xs text-zinc-500 underline"
-                      type="button"
-                      onClick={() => rightBookId && void loadRightNodes(rightBookId)}
-                    >
-                      Refresh nodes
-                    </button>
-                  ) : null}
-                </div>
-                <div
-                  className="rounded-lg border border-dashed border-zinc-300 bg-white p-3 text-xs text-zinc-500"
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) =>
-                    handleDropNode(event, rightBookId, null, setRightNodesError)
-                  }
-                >
-                  Drop here to move to root
-                </div>
-                <div className="rounded-lg border border-zinc-100 bg-white p-4 text-sm">
-                  {rightBookId === null ? (
-                    <p className="text-zinc-500">Select a book to view nodes.</p>
-                  ) : rightNodesLoading && rightNodes.length === 0 ? (
-                    <p className="text-zinc-500">Loading nodes...</p>
-                  ) : rightNodes.length === 0 ? (
-                    <p className="text-zinc-500">No nodes yet.</p>
-                  ) : (
-                    renderTree(
-                      rightTree,
-                      rightSelectedNodeId,
-                      setRightSelectedNodeId,
-                      rightBookId,
-                      (event, dstParentId, setError) =>
-                        handleDropNode(
-                          event,
-                          rightBookId,
-                          dstParentId,
-                          setError,
-                        ),
-                      setRightNodesError,
-                    )
-                  )}
-                </div>
-                {rightNodesError ? (
-                  <p className="text-sm text-red-600">{rightNodesError}</p>
+                    Refresh nodes
+                  </button>
                 ) : null}
               </div>
 
-              <div className="space-y-3 rounded-lg border border-zinc-100 bg-white p-4">
-                <h3 className="text-sm font-semibold text-zinc-600">Problems</h3>
-                {rightBookId === null ? (
-                  <p className="text-sm text-zinc-500">
-                    Select a book to view problems.
-                  </p>
-                ) : rightSelectedNodeId === null ? (
-                  <p className="text-sm text-zinc-500">
-                    Select a chapter to load problems.
-                  </p>
+              <div
+                className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-3 text-xs text-zinc-500"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) =>
+                  handleDropNode(
+                    event,
+                    secondaryBookId,
+                    null,
+                    setSecondaryNodesError,
+                  )
+                }
+              >
+                Root drop area
+              </div>
+
+              <div className="min-h-[320px] rounded-lg border border-zinc-100 bg-zinc-50 p-4 text-sm">
+                {secondaryBookId === null ? (
+                  <p className="text-zinc-500">Select a book to view nodes.</p>
+                ) : secondaryNodesLoading && secondaryNodes.length === 0 ? (
+                  <p className="text-zinc-500">Loading nodes...</p>
+                ) : secondaryNodes.length === 0 ? (
+                  <p className="text-zinc-500">No nodes yet.</p>
                 ) : (
-                  <>
-                    <div className="space-y-1">
-                      <p className="text-xs text-zinc-500">Selected node</p>
-                      <p className="text-sm font-medium text-zinc-900">
-                        {getNodeById(rightNodes, rightSelectedNodeId)?.title ??
-                          "Untitled"}
-                        <span className="ml-2 text-xs text-zinc-500">
-                          id: {rightSelectedNodeId}
-                        </span>
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <h4 className="text-xs font-semibold text-zinc-600">
-                        Existing problems
-                      </h4>
-                      {rightProblemsLoading ? (
-                        <p className="text-xs text-zinc-500">Loading problems...</p>
-                      ) : rightProblems.length === 0 ? (
-                        <p className="text-xs text-zinc-500">No problems yet.</p>
-                      ) : (
-                        <ul className="space-y-2">
-                          {rightProblems.map((problem, index) => (
-                            <li
-                              key={problem.problem_id ?? `problem-${index}`}
-                              className="rounded-md border border-zinc-100 bg-zinc-50 px-3 py-2"
-                            >
-                              <p className="text-sm font-medium text-zinc-900">
-                                {problem.intent ?? "Untitled problem"}
-                              </p>
-                              <p className="text-xs text-zinc-500">
-                                id: {problem.problem_id ?? "-"} ·
-                                {problem.format ?? "format"} ·
-                                {problem.difficulty ?? "difficulty"}
-                              </p>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      {rightProblemsError ? (
-                        <p className="text-xs text-red-600">{rightProblemsError}</p>
-                      ) : null}
-                    </div>
-                    <div className="space-y-2">
-                      <h4 className="text-xs font-semibold text-zinc-600">
-                        Add problem
-                      </h4>
-                      <input
-                        className="w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
-                        placeholder="Problem title"
-                        value={rightProblemTitle}
-                        onChange={(event) =>
-                          setRightProblemTitle(event.target.value)
-                        }
-                      />
-                      <textarea
-                        className="min-h-[120px] w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
-                        placeholder="Problem body"
-                        value={rightProblemBody}
-                        onChange={(event) => setRightProblemBody(event.target.value)}
-                      />
-                      <button
-                        className="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
-                        type="button"
-                        onClick={() =>
-                          void handleProblemSubmit(
-                            rightSelectedNodeId,
-                            rightProblemTitle,
-                            rightProblemBody,
-                            setRightProblemSaving,
-                            () => {
-                              setRightProblemTitle("");
-                              setRightProblemBody("");
-                            },
-                            setRightProblemsError,
-                            loadRightProblems,
-                          )
-                        }
-                        disabled={
-                          rightProblemSaving ||
-                          !rightProblemTitle.trim() ||
-                          !rightProblemBody.trim()
-                        }
-                      >
-                        {rightProblemSaving ? "Saving..." : "Add problem"}
-                      </button>
-                    </div>
-                  </>
+                  renderTree(
+                    secondaryTree,
+                    secondarySelectedNodeId,
+                    secondaryBookId,
+                    (nodeId) => {
+                      setSecondarySelectedNodeId(nodeId);
+                      openProblemsModal("secondary", nodeId);
+                    },
+                    (event, dstParentId) =>
+                      handleDropNode(
+                        event,
+                        secondaryBookId,
+                        dstParentId,
+                        setSecondaryNodesError,
+                      ),
+                  )
                 )}
               </div>
-            </div>
-          </section>
+              {secondaryNodesError ? (
+                <p className="text-xs text-red-600">{secondaryNodesError}</p>
+              ) : null}
+            </section>
+          </div>
         </div>
       </main>
+
+      {modalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 text-zinc-900 shadow-xl">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-semibold">Problems</h3>
+                <p className="text-xs text-zinc-500">
+                  {activeNode?.title ?? "Untitled node"} · id: {activeNodeId ?? "-"}
+                </p>
+              </div>
+              <button
+                className="text-sm text-zinc-500"
+                type="button"
+                onClick={() => setModalOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <div>
+                <h4 className="text-xs font-semibold text-zinc-600">
+                  Existing problems
+                </h4>
+                {problemsLoading ? (
+                  <p className="text-xs text-zinc-500">Loading problems...</p>
+                ) : problems.length === 0 ? (
+                  <p className="text-xs text-zinc-500">No problems yet.</p>
+                ) : (
+                  <ul className="mt-2 space-y-2">
+                    {problems.map((problem, index) => (
+                      <li
+                        key={problem.problem_id ?? `problem-${index}`}
+                        className="rounded-md border border-zinc-100 bg-zinc-50 px-3 py-2"
+                      >
+                        <p className="text-sm font-medium text-zinc-900">
+                          {problem.intent ?? "Untitled problem"}
+                        </p>
+                        <p className="text-xs text-zinc-500">
+                          id: {problem.problem_id ?? "-"} ·{problem.format ?? "format"} ·
+                          {problem.difficulty ?? "difficulty"}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {problemsError ? (
+                  <p className="text-xs text-red-600">{problemsError}</p>
+                ) : null}
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="text-xs font-semibold text-zinc-600">
+                  Add problem
+                </h4>
+                <input
+                  className="w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                  placeholder="Problem title"
+                  value={problemTitle}
+                  onChange={(event) => setProblemTitle(event.target.value)}
+                />
+                <textarea
+                  className="min-h-[120px] w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                  placeholder="Problem body"
+                  value={problemBody}
+                  onChange={(event) => setProblemBody(event.target.value)}
+                />
+                <button
+                  className="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
+                  type="button"
+                  onClick={() => void handleProblemSubmit()}
+                  disabled={
+                    problemSaving ||
+                    !problemTitle.trim() ||
+                    !problemBody.trim() ||
+                    !activeNodeId
+                  }
+                >
+                  {problemSaving ? "Saving..." : "Add problem"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

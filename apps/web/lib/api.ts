@@ -211,6 +211,10 @@ export async function listProblems(
     },
   });
 
+  if (response.status === 404) {
+    throw new Error("Problems API not implemented yet");
+  }
+
   return parseProblemsResponse(response);
 }
 
@@ -235,6 +239,10 @@ export async function createProblem(
       tags: [],
     }),
   });
+
+  if (response.status === 404) {
+    throw new Error("Problems API not implemented yet");
+  }
 
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
