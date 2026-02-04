@@ -4,8 +4,11 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type DragEvent,
+  type MouseEvent,
+  type WheelEvent,
 } from "react";
 
 import {
@@ -19,38 +22,13 @@ import {
   type BookNode,
   type ProblemSummary,
 } from "../lib/api";
-
-type TreeData = {
-  childrenMap: Map<string, BookNode[]>;
-  normalizeKey: (value: BookNode["parent_id"]) => string;
-};
+import { buildGraphLayout } from "../lib/graphLayout";
 
 type Slot = "primary" | "secondary";
 
 type DragPayload = {
   nodeId?: string | number;
   bookId?: string | number;
-};
-
-const buildTreeData = (nodes: BookNode[]): TreeData => {
-  const sortedNodes = [...nodes].sort((a, b) => {
-    const orderA = Number(a.order_index ?? 0);
-    const orderB = Number(b.order_index ?? 0);
-    return orderA - orderB;
-  });
-  const childrenMap = new Map<string, BookNode[]>();
-  const normalizeKey = (value: BookNode["parent_id"]) =>
-    value === null || value === undefined ? "root" : String(value);
-
-  for (const node of sortedNodes) {
-    const key = normalizeKey(node.parent_id);
-    if (!childrenMap.has(key)) {
-      childrenMap.set(key, []);
-    }
-    childrenMap.get(key)?.push(node);
-  }
-
-  return { childrenMap, normalizeKey };
 };
 
 const getNodeById = (
@@ -73,71 +51,78 @@ const getBookById = (
   return books.find((book) => String(book.id) === String(bookId));
 };
 
-const renderTree = (
-  tree: TreeData,
-  selectedNodeId: string | number | null,
-  bookId: string | number | null,
-  onSelect: (nodeId: string | number) => void,
-  onDrop: (
-    event: DragEvent<HTMLButtonElement | HTMLDivElement>,
-    dstParentId: string | number | null,
-  ) => void,
-): JSX.Element | null => {
-  const renderNodes = (parentKey: string, depth: number): JSX.Element | null => {
-    const children = tree.childrenMap.get(parentKey);
-    if (!children || children.length === 0) {
-      return null;
-    }
+const GRAPH_NODE_WIDTH = 200;
+const GRAPH_NODE_HEIGHT = 72;
 
-    return (
-      <ul className="space-y-2">
-        {children.map((node) => {
-          const nodeKey = node.id ?? `${node.title}-${node.parent_id ?? "root"}`;
-          const childKey = tree.normalizeKey(node.id);
-          const isSelected =
-            selectedNodeId !== null &&
-            String(selectedNodeId) === String(node.id);
-          return (
-            <li key={nodeKey} className="space-y-2">
-              <button
-                className={`w-full rounded-md border px-3 py-2 text-left text-sm shadow-sm transition focus:outline-none focus:ring-2 focus:ring-zinc-400 ${
-                  isSelected
-                    ? "border-zinc-900 bg-zinc-900 text-white"
-                    : "border-zinc-100 bg-white text-zinc-900 hover:bg-zinc-50"
-                }`}
-                style={{ marginLeft: `${depth * 16}px` }}
-                type="button"
-                draggable={Boolean(node.id && bookId)}
-                onDragStart={(event) => {
-                  if (!node.id || !bookId) {
-                    return;
-                  }
-                  event.dataTransfer.setData(
-                    "application/json",
-                    JSON.stringify({ nodeId: node.id, bookId }),
-                  );
-                  event.dataTransfer.effectAllowed = "move";
-                }}
-                onClick={() => {
-                  if (node.id !== undefined && node.id !== null) {
-                    onSelect(node.id);
-                  }
-                }}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => onDrop(event, node.id ?? null)}
-              >
-                <div className="font-medium">{node.title}</div>
-                <div className="text-xs text-zinc-500">id: {node.id ?? "-"}</div>
-              </button>
-              {renderNodes(childKey, depth + 1)}
-            </li>
-          );
-        })}
-      </ul>
-    );
-  };
+type Viewport = {
+  x: number;
+  y: number;
+  scale: number;
+};
 
-  return renderNodes("root", 0);
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, value));
+
+const usePanZoom = () => {
+  const [viewport, setViewport] = useState<Viewport>({
+    x: 0,
+    y: 0,
+    scale: 1,
+  });
+  const panRef = useRef<{
+    startX: number;
+    startY: number;
+    baseX: number;
+    baseY: number;
+  } | null>(null);
+
+  const onMouseDown = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (event.button !== 0) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("[data-node-card='true']")) {
+        return;
+      }
+      panRef.current = {
+        startX: event.clientX,
+        startY: event.clientY,
+        baseX: viewport.x,
+        baseY: viewport.y,
+      };
+      const handleMove = (moveEvent: MouseEvent) => {
+        if (!panRef.current) {
+          return;
+        }
+        const { baseX, baseY, startX, startY } = panRef.current;
+        setViewport((prev) => ({
+          ...prev,
+          x: baseX + (moveEvent.clientX - startX),
+          y: baseY + (moveEvent.clientY - startY),
+        }));
+      };
+      const handleUp = () => {
+        panRef.current = null;
+        window.removeEventListener("mousemove", handleMove);
+        window.removeEventListener("mouseup", handleUp);
+      };
+      window.addEventListener("mousemove", handleMove);
+      window.addEventListener("mouseup", handleUp);
+    },
+    [viewport.x, viewport.y],
+  );
+
+  const onWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const delta = -event.deltaY * 0.001;
+    setViewport((prev) => {
+      const nextScale = clamp(prev.scale + delta, 0.5, 2);
+      return { ...prev, scale: nextScale };
+    });
+  }, []);
+
+  return { viewport, setViewport, onMouseDown, onWheel };
 };
 
 export default function Home() {
@@ -399,9 +384,20 @@ export default function Home() {
     ],
   );
 
-  const primaryTree = useMemo(() => buildTreeData(primaryNodes), [primaryNodes]);
-  const secondaryTree = useMemo(
-    () => buildTreeData(secondaryNodes),
+  const primaryLayout = useMemo(
+    () =>
+      buildGraphLayout(primaryNodes, {
+        nodeWidth: GRAPH_NODE_WIDTH,
+        nodeHeight: GRAPH_NODE_HEIGHT,
+      }),
+    [primaryNodes],
+  );
+  const secondaryLayout = useMemo(
+    () =>
+      buildGraphLayout(secondaryNodes, {
+        nodeWidth: GRAPH_NODE_WIDTH,
+        nodeHeight: GRAPH_NODE_HEIGHT,
+      }),
     [secondaryNodes],
   );
 
@@ -445,8 +441,32 @@ export default function Home() {
   const primaryBook = getBookById(books, primaryBookId);
   const secondaryBook = getBookById(books, secondaryBookId);
   const activeNodes =
-    activeSlot === "primary" ? primaryNodes : activeSlot === "secondary" ? secondaryNodes : [];
+    activeSlot === "primary"
+      ? primaryNodes
+      : activeSlot === "secondary"
+        ? secondaryNodes
+        : [];
   const activeNode = getNodeById(activeNodes, activeNodeId);
+  const {
+    viewport: primaryViewport,
+    setViewport: setPrimaryViewport,
+    onMouseDown: onPrimaryMouseDown,
+    onWheel: onPrimaryWheel,
+  } = usePanZoom();
+  const {
+    viewport: secondaryViewport,
+    setViewport: setSecondaryViewport,
+    onMouseDown: onSecondaryMouseDown,
+    onWheel: onSecondaryWheel,
+  } = usePanZoom();
+
+  useEffect(() => {
+    setPrimaryViewport({ x: 0, y: 0, scale: 1 });
+  }, [primaryBookId, setPrimaryViewport]);
+
+  useEffect(() => {
+    setSecondaryViewport({ x: 0, y: 0, scale: 1 });
+  }, [secondaryBookId, setSecondaryViewport]);
 
   return (
     <div className="flex min-h-screen bg-zinc-950 text-zinc-100">
@@ -584,7 +604,11 @@ export default function Home() {
             </p>
           </header>
 
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div
+            className={`grid gap-6 ${
+              secondaryBookId ? "lg:grid-cols-2" : "lg:grid-cols-1"
+            }`}
+          >
             <section className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -616,30 +640,123 @@ export default function Home() {
                 Root drop area
               </div>
 
-              <div className="min-h-[320px] rounded-lg border border-zinc-100 bg-zinc-50 p-4 text-sm">
+              <div className="relative h-[420px] overflow-hidden rounded-lg border border-zinc-100 bg-zinc-50 text-sm">
                 {primaryBookId === null ? (
-                  <p className="text-zinc-500">Select a book to view nodes.</p>
+                  <div className="flex h-full items-center justify-center text-zinc-500">
+                    Select a book to view nodes.
+                  </div>
                 ) : primaryNodesLoading && primaryNodes.length === 0 ? (
-                  <p className="text-zinc-500">Loading nodes...</p>
+                  <div className="flex h-full items-center justify-center text-zinc-500">
+                    Loading nodes...
+                  </div>
                 ) : primaryNodes.length === 0 ? (
-                  <p className="text-zinc-500">No nodes yet.</p>
+                  <div className="flex h-full items-center justify-center text-zinc-500">
+                    No nodes yet.
+                  </div>
                 ) : (
-                  renderTree(
-                    primaryTree,
-                    primarySelectedNodeId,
-                    primaryBookId,
-                    (nodeId) => {
-                      setPrimarySelectedNodeId(nodeId);
-                      openProblemsModal("primary", nodeId);
-                    },
-                    (event, dstParentId) =>
-                      handleDropNode(
-                        event,
-                        primaryBookId,
-                        dstParentId,
-                        setPrimaryNodesError,
-                      ),
-                  )
+                  <div
+                    className="absolute inset-0"
+                    onMouseDown={onPrimaryMouseDown}
+                    onWheel={onPrimaryWheel}
+                  >
+                    <div
+                      className="absolute inset-0"
+                      style={{
+                        transform: `translate(${primaryViewport.x}px, ${primaryViewport.y}px) scale(${primaryViewport.scale})`,
+                        transformOrigin: "0 0",
+                      }}
+                    >
+                      <svg
+                        className="absolute left-0 top-0"
+                        width={primaryLayout.width}
+                        height={primaryLayout.height}
+                      >
+                        {primaryLayout.edges.map((edge) => {
+                          const startX =
+                            edge.from.x + GRAPH_NODE_WIDTH / 2;
+                          const startY = edge.from.y + GRAPH_NODE_HEIGHT;
+                          const endX = edge.to.x + GRAPH_NODE_WIDTH / 2;
+                          const endY = edge.to.y;
+                          return (
+                            <line
+                              key={`${edge.from.id}-${edge.to.id}`}
+                              x1={startX}
+                              y1={startY}
+                              x2={endX}
+                              y2={endY}
+                              stroke="#d4d4d8"
+                              strokeWidth={2}
+                            />
+                          );
+                        })}
+                      </svg>
+                      {primaryLayout.nodes.map((graphNode) => {
+                        const isSelected =
+                          primarySelectedNodeId !== null &&
+                          String(primarySelectedNodeId) === graphNode.id;
+                        return (
+                          <button
+                            key={graphNode.id}
+                            data-node-card="true"
+                            className={`absolute rounded-lg border px-3 py-2 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-zinc-400 ${
+                              isSelected
+                                ? "border-zinc-900 bg-zinc-900 text-white"
+                                : "border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50"
+                            }`}
+                            style={{
+                              left: graphNode.x,
+                              top: graphNode.y,
+                              width: GRAPH_NODE_WIDTH,
+                              height: GRAPH_NODE_HEIGHT,
+                            }}
+                            type="button"
+                            draggable={Boolean(graphNode.node.id && primaryBookId)}
+                            onDragStart={(event) => {
+                              if (!graphNode.node.id || !primaryBookId) {
+                                return;
+                              }
+                              event.dataTransfer.setData(
+                                "application/json",
+                                JSON.stringify({
+                                  nodeId: graphNode.node.id,
+                                  bookId: primaryBookId,
+                                }),
+                              );
+                              event.dataTransfer.effectAllowed = "move";
+                            }}
+                            onClick={() => {
+                              if (
+                                graphNode.node.id !== undefined &&
+                                graphNode.node.id !== null
+                              ) {
+                                setPrimarySelectedNodeId(graphNode.node.id);
+                                openProblemsModal(
+                                  "primary",
+                                  graphNode.node.id,
+                                );
+                              }
+                            }}
+                            onDragOver={(event) => event.preventDefault()}
+                            onDrop={(event) =>
+                              handleDropNode(
+                                event,
+                                primaryBookId,
+                                graphNode.node.id ?? null,
+                                setPrimaryNodesError,
+                              )
+                            }
+                          >
+                            <div className="font-medium">
+                              {graphNode.node.title}
+                            </div>
+                            <div className="text-xs text-zinc-500">
+                              id: {graphNode.node.id ?? "-"}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 )}
               </div>
               {primaryNodesError ? (
@@ -647,73 +764,172 @@ export default function Home() {
               ) : null}
             </section>
 
-            <section className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-semibold">Secondary tree</h3>
-                  <p className="text-xs text-zinc-500">
-                    {secondaryBook?.title ?? "Select a book"}
-                  </p>
+            {secondaryBookId ? (
+              <section className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold">Secondary tree</h3>
+                    <p className="text-xs text-zinc-500">
+                      {secondaryBook?.title ?? "Select a book"}
+                    </p>
+                  </div>
+                  {secondaryBookId ? (
+                    <button
+                      className="text-xs text-zinc-500 underline"
+                      type="button"
+                      onClick={() =>
+                        secondaryBookId &&
+                        void loadNodes(secondaryBookId, "secondary")
+                      }
+                    >
+                      Refresh nodes
+                    </button>
+                  ) : null}
                 </div>
-                {secondaryBookId ? (
-                  <button
-                    className="text-xs text-zinc-500 underline"
-                    type="button"
-                    onClick={() =>
-                      secondaryBookId &&
-                      void loadNodes(secondaryBookId, "secondary")
-                    }
-                  >
-                    Refresh nodes
-                  </button>
+
+                <div
+                  className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-3 text-xs text-zinc-500"
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) =>
+                    handleDropNode(
+                      event,
+                      secondaryBookId,
+                      null,
+                      setSecondaryNodesError,
+                    )
+                  }
+                >
+                  Root drop area
+                </div>
+
+                <div className="relative h-[420px] overflow-hidden rounded-lg border border-zinc-100 bg-zinc-50 text-sm">
+                  {secondaryBookId === null ? (
+                    <div className="flex h-full items-center justify-center text-zinc-500">
+                      Select a book to view nodes.
+                    </div>
+                  ) : secondaryNodesLoading && secondaryNodes.length === 0 ? (
+                    <div className="flex h-full items-center justify-center text-zinc-500">
+                      Loading nodes...
+                    </div>
+                  ) : secondaryNodes.length === 0 ? (
+                    <div className="flex h-full items-center justify-center text-zinc-500">
+                      No nodes yet.
+                    </div>
+                  ) : (
+                    <div
+                      className="absolute inset-0"
+                      onMouseDown={onSecondaryMouseDown}
+                      onWheel={onSecondaryWheel}
+                    >
+                      <div
+                        className="absolute inset-0"
+                        style={{
+                          transform: `translate(${secondaryViewport.x}px, ${secondaryViewport.y}px) scale(${secondaryViewport.scale})`,
+                          transformOrigin: "0 0",
+                        }}
+                      >
+                        <svg
+                          className="absolute left-0 top-0"
+                          width={secondaryLayout.width}
+                          height={secondaryLayout.height}
+                        >
+                          {secondaryLayout.edges.map((edge) => {
+                            const startX =
+                              edge.from.x + GRAPH_NODE_WIDTH / 2;
+                            const startY = edge.from.y + GRAPH_NODE_HEIGHT;
+                            const endX = edge.to.x + GRAPH_NODE_WIDTH / 2;
+                            const endY = edge.to.y;
+                            return (
+                              <line
+                                key={`${edge.from.id}-${edge.to.id}`}
+                                x1={startX}
+                                y1={startY}
+                                x2={endX}
+                                y2={endY}
+                                stroke="#d4d4d8"
+                                strokeWidth={2}
+                              />
+                            );
+                          })}
+                        </svg>
+                        {secondaryLayout.nodes.map((graphNode) => {
+                          const isSelected =
+                            secondarySelectedNodeId !== null &&
+                            String(secondarySelectedNodeId) === graphNode.id;
+                          return (
+                            <button
+                              key={graphNode.id}
+                              data-node-card="true"
+                              className={`absolute rounded-lg border px-3 py-2 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-zinc-400 ${
+                                isSelected
+                                  ? "border-zinc-900 bg-zinc-900 text-white"
+                                  : "border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50"
+                              }`}
+                              style={{
+                                left: graphNode.x,
+                                top: graphNode.y,
+                                width: GRAPH_NODE_WIDTH,
+                                height: GRAPH_NODE_HEIGHT,
+                              }}
+                              type="button"
+                              draggable={Boolean(
+                                graphNode.node.id && secondaryBookId,
+                              )}
+                              onDragStart={(event) => {
+                                if (!graphNode.node.id || !secondaryBookId) {
+                                  return;
+                                }
+                                event.dataTransfer.setData(
+                                  "application/json",
+                                  JSON.stringify({
+                                    nodeId: graphNode.node.id,
+                                    bookId: secondaryBookId,
+                                  }),
+                                );
+                                event.dataTransfer.effectAllowed = "move";
+                              }}
+                              onClick={() => {
+                                if (
+                                  graphNode.node.id !== undefined &&
+                                  graphNode.node.id !== null
+                                ) {
+                                  setSecondarySelectedNodeId(
+                                    graphNode.node.id,
+                                  );
+                                  openProblemsModal(
+                                    "secondary",
+                                    graphNode.node.id,
+                                  );
+                                }
+                              }}
+                              onDragOver={(event) => event.preventDefault()}
+                              onDrop={(event) =>
+                                handleDropNode(
+                                  event,
+                                  secondaryBookId,
+                                  graphNode.node.id ?? null,
+                                  setSecondaryNodesError,
+                                )
+                              }
+                            >
+                              <div className="font-medium">
+                                {graphNode.node.title}
+                              </div>
+                              <div className="text-xs text-zinc-500">
+                                id: {graphNode.node.id ?? "-"}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {secondaryNodesError ? (
+                  <p className="text-xs text-red-600">{secondaryNodesError}</p>
                 ) : null}
-              </div>
-
-              <div
-                className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-3 text-xs text-zinc-500"
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) =>
-                  handleDropNode(
-                    event,
-                    secondaryBookId,
-                    null,
-                    setSecondaryNodesError,
-                  )
-                }
-              >
-                Root drop area
-              </div>
-
-              <div className="min-h-[320px] rounded-lg border border-zinc-100 bg-zinc-50 p-4 text-sm">
-                {secondaryBookId === null ? (
-                  <p className="text-zinc-500">Select a book to view nodes.</p>
-                ) : secondaryNodesLoading && secondaryNodes.length === 0 ? (
-                  <p className="text-zinc-500">Loading nodes...</p>
-                ) : secondaryNodes.length === 0 ? (
-                  <p className="text-zinc-500">No nodes yet.</p>
-                ) : (
-                  renderTree(
-                    secondaryTree,
-                    secondarySelectedNodeId,
-                    secondaryBookId,
-                    (nodeId) => {
-                      setSecondarySelectedNodeId(nodeId);
-                      openProblemsModal("secondary", nodeId);
-                    },
-                    (event, dstParentId) =>
-                      handleDropNode(
-                        event,
-                        secondaryBookId,
-                        dstParentId,
-                        setSecondaryNodesError,
-                      ),
-                  )
-                )}
-              </div>
-              {secondaryNodesError ? (
-                <p className="text-xs text-red-600">{secondaryNodesError}</p>
-              ) : null}
-            </section>
+              </section>
+            ) : null}
           </div>
         </div>
       </main>
