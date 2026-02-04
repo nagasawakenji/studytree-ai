@@ -218,7 +218,7 @@ func (r *NodeRepository) MoveSubtree(ctx context.Context, userID string, bookID 
 		return usecase.Node{}, err
 	}
 	defer tx.Rollback(ctx)
-
+	
 	var rootID int64
 	if err := tx.QueryRow(ctx, `
 		SELECT id
@@ -232,6 +232,11 @@ func (r *NodeRepository) MoveSubtree(ctx context.Context, userID string, bookID 
 	}
 
 	if dstParentID != nil {
+		if *dstParentID == nodeID {
+			return usecase.Node{}, usecase.ErrInvalidMoveParent
+		}
+
+		// Parent must exist in destination book.
 		var parentID int64
 		if err := tx.QueryRow(ctx, `
 			SELECT id
@@ -243,8 +248,30 @@ func (r *NodeRepository) MoveSubtree(ctx context.Context, userID string, bookID 
 			}
 			return usecase.Node{}, err
 		}
+
+		var isInSubtree bool
+		if err := tx.QueryRow(ctx, `
+			WITH RECURSIVE subtree AS (
+				SELECT id
+				FROM nodes
+				WHERE user_id = $1 AND book_id = $2 AND id = $3
+				UNION ALL
+				SELECT n.id
+				FROM nodes n
+				INNER JOIN subtree s ON n.parent_id = s.id
+				WHERE n.user_id = $1 AND n.book_id = $2
+			)
+			SELECT EXISTS (SELECT 1 FROM subtree WHERE id = $4)
+		`, userID, bookID, nodeID, *dstParentID).Scan(&isInSubtree); err != nil {
+			return usecase.Node{}, err
+		}
+		if isInSubtree {
+			return usecase.Node{}, usecase.ErrInvalidMoveParent
+		}
 	}
 
+	// 3) Move the entire subtree to the destination book.
+	// IMPORTANT: Keep the recursion constrained to the original source book.
 	_, err = tx.Exec(ctx, `
 		WITH RECURSIVE subtree AS (
 			SELECT id
@@ -254,7 +281,7 @@ func (r *NodeRepository) MoveSubtree(ctx context.Context, userID string, bookID 
 			SELECT n.id
 			FROM nodes n
 			INNER JOIN subtree s ON n.parent_id = s.id
-			WHERE n.user_id = $1
+			WHERE n.user_id = $1 AND n.book_id = $2
 		)
 		UPDATE nodes
 		SET book_id = $4

@@ -29,6 +29,22 @@ export type ProblemDetail = ProblemSummary & {
 
 const API_PREFIX = "/api/v1";
 
+function toInt64(value: string | number, fieldName: string): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) {
+    throw new Error(`${fieldName} must be an integer number`);
+  }
+  return n;
+}
+
+function toOptionalInt64(
+  value: string | number | null | undefined,
+  fieldName: string,
+): number | null {
+  if (value === undefined || value === null) return null;
+  return toInt64(value, fieldName);
+}
+
 type BooksResponse = Book[] | { data?: Book[] };
 
 async function parseBooksResponse(response: Response): Promise<Book[]> {
@@ -234,8 +250,25 @@ export async function moveSubtree(params: {
   dstParentId?: string | number | null;
   dstOrderIndex?: number | null;
 }): Promise<BookNode> {
+  // URL path params can be strings; JSON body must be numbers/null to match Go int64 decoding.
+  const srcBookIdStr = String(params.srcBookId);
+  const nodeIdStr = String(params.nodeId);
+
+  const dstBookId = toInt64(params.dstBookId, "dstBookId");
+  const dstParentId = toOptionalInt64(params.dstParentId, "dstParentId");
+
+  // Backend treats dst_order_index as required & non-negative; default to 0.
+  const dstOrderIndex =
+    params.dstOrderIndex === undefined || params.dstOrderIndex === null
+      ? 0
+      : params.dstOrderIndex;
+
+  if (!Number.isFinite(dstOrderIndex) || dstOrderIndex < 0) {
+    throw new Error("dstOrderIndex must be a non-negative number");
+  }
+
   const response = await fetch(
-    `${API_PREFIX}/books/${params.srcBookId}/nodes/${params.nodeId}/move`,
+    `${API_PREFIX}/books/${srcBookIdStr}/nodes/${nodeIdStr}/move`,
     {
       method: "PATCH",
       headers: {
@@ -243,18 +276,16 @@ export async function moveSubtree(params: {
         Accept: "application/json",
       },
       body: JSON.stringify({
-        dst_book_id: params.dstBookId,
-        dst_parent_id:
-          params.dstParentId === undefined ? null : params.dstParentId,
-        ...(params.dstOrderIndex !== undefined
-          ? { dst_order_index: params.dstOrderIndex }
-          : {}),
+        dst_book_id: dstBookId,
+        dst_parent_id: dstParentId,
+        dst_order_index: dstOrderIndex,
       }),
     },
   );
 
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    const text = await response.text().catch(() => "");
+    throw new Error(`Request failed: ${response.status} ${text}`);
   }
 
   return (await response.json()) as BookNode;
