@@ -10,21 +10,20 @@ export type BookNode = {
   order_index?: number | null;
 };
 
-export type ProblemSummary = {
-  problem_id?: string | number;
-  node_id?: string | number;
-  difficulty?: string;
-  format?: string;
-  intent?: string;
+export type ProblemContent = {
+  title: string;
+  body_md?: string;
+  answer_md?: string;
 };
 
-export type ProblemDetail = ProblemSummary & {
-  statement?: string;
-  answer?: string;
-  outline?: string | null;
-  hints?: string[];
-  prereq_node_ids?: string[];
-  tags?: string[];
+export type Problem = {
+  id?: string | number;
+  node_id?: string | number;
+  kind?: string;
+  schema_ver?: number;
+  content?: ProblemContent;
+  created_at?: string;
+  updated_at?: string;
 };
 
 const API_PREFIX = "/api/v1";
@@ -182,11 +181,11 @@ export async function createNode(
   return (await response.json()) as BookNode;
 }
 
-type ProblemsResponse = { items?: ProblemSummary[] } | ProblemSummary[];
+type ProblemsResponse = { items?: Problem[] } | Problem[];
 
 async function parseProblemsResponse(
   response: Response,
-): Promise<ProblemSummary[]> {
+): Promise<Problem[]> {
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
   }
@@ -203,7 +202,7 @@ async function parseProblemsResponse(
 
 export async function listProblems(
   nodeId: string | number,
-): Promise<ProblemSummary[]> {
+): Promise<Problem[]> {
   const response = await fetch(`${API_PREFIX}/nodes/${nodeId}/problems`, {
     method: "GET",
     headers: {
@@ -211,17 +210,18 @@ export async function listProblems(
     },
   });
 
-  if (response.status === 404) {
-    throw new Error("Problems API not implemented yet");
-  }
-
   return parseProblemsResponse(response);
 }
 
 export async function createProblem(
   nodeId: string | number,
-  payload: { title: string; body: string },
-): Promise<ProblemDetail> {
+  payload: {
+    kind?: string;
+    title: string;
+    bodyMd?: string;
+    answerMd?: string;
+  },
+): Promise<Problem> {
   const response = await fetch(`${API_PREFIX}/nodes/${nodeId}/problems`, {
     method: "POST",
     headers: {
@@ -229,26 +229,20 @@ export async function createProblem(
       Accept: "application/json",
     },
     body: JSON.stringify({
-      difficulty: "basic",
-      format: "short",
-      intent: payload.title,
-      statement: payload.body,
-      answer: "",
-      hints: [],
-      prereq_node_ids: [],
-      tags: [],
+      kind: payload.kind ?? "qa",
+      content: {
+        title: payload.title,
+        body_md: payload.bodyMd ?? "",
+        answer_md: payload.answerMd ?? "",
+      },
     }),
   });
-
-  if (response.status === 404) {
-    throw new Error("Problems API not implemented yet");
-  }
 
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
   }
 
-  return (await response.json()) as ProblemDetail;
+  return (await response.json()) as Problem;
 }
 
 export async function moveSubtree(params: {

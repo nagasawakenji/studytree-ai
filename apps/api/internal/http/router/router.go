@@ -16,14 +16,16 @@ import (
 func NewRouter(log *logger.Logger, pool *pgxpool.Pool) http.Handler {
 	bookRepo := repository.NewBookRepository(pool)
 	nodeRepo := repository.NewNodeRepository(pool)
+	problemRepo := repository.NewProblemRepository(pool)
 	bookUsecase := usecase.NewBookUsecase(bookRepo)
 	nodeUsecase := usecase.NewNodeUsecase(nodeRepo)
+	problemUsecase := usecase.NewProblemUsecase(problemRepo)
 
-	return NewRouterWithUsecases(log, bookUsecase, nodeUsecase)
+	return NewRouterWithUsecases(log, bookUsecase, nodeUsecase, problemUsecase)
 }
 
 // NewRouterWithUsecases sets up the HTTP routes with injected usecases.
-func NewRouterWithUsecases(log *logger.Logger, bookUsecase *usecase.BookUsecase, nodeUsecase *usecase.NodeUsecase) http.Handler {
+func NewRouterWithUsecases(log *logger.Logger, bookUsecase *usecase.BookUsecase, nodeUsecase *usecase.NodeUsecase, problemUsecase *usecase.ProblemUsecase) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -31,6 +33,7 @@ func NewRouterWithUsecases(log *logger.Logger, bookUsecase *usecase.BookUsecase,
 
 	bookHandler := handler.NewBookHandler(bookUsecase)
 	nodeHandler := handler.NewNodeHandler(nodeUsecase)
+	problemHandler := handler.NewProblemHandler(problemUsecase)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/healthz", handler.Healthz)
@@ -44,6 +47,10 @@ func NewRouterWithUsecases(log *logger.Logger, bookUsecase *usecase.BookUsecase,
 				r.Patch("/{node_id}/move", nodeHandler.Move)
 				r.Put("/reorder", nodeHandler.Reorder)
 			})
+		})
+		r.Route("/nodes/{node_id}/problems", func(r chi.Router) {
+			r.Get("/", problemHandler.ListByNode)
+			r.Post("/", problemHandler.Create)
 		})
 	})
 
