@@ -218,7 +218,7 @@ func (r *NodeRepository) MoveSubtree(ctx context.Context, userID string, bookID 
 		return usecase.Node{}, err
 	}
 	defer tx.Rollback(ctx)
-	
+
 	var rootID int64
 	if err := tx.QueryRow(ctx, `
 		SELECT id
