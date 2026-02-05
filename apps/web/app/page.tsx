@@ -24,6 +24,7 @@ import {
   type Problem,
 } from "../lib/api";
 import { buildGraphLayout } from "../lib/graphLayout";
+import { MarkdownContent } from "../lib/markdown";
 
 type Slot = "primary" | "secondary";
 
@@ -186,6 +187,16 @@ export default function Home() {
   const [problemBody, setProblemBody] = useState("");
   const [problemAnswer, setProblemAnswer] = useState("");
   const [problemSaving, setProblemSaving] = useState(false);
+  const [expandedProblemKey, setExpandedProblemKey] = useState<string | null>(
+    null,
+  );
+  const [visibleAnswers, setVisibleAnswers] = useState<
+    Record<string, boolean>
+  >({});
+  const [highlightedProblemKey, setHighlightedProblemKey] = useState<
+    string | null
+  >(null);
+  const highlightTimeoutRef = useRef<number | null>(null);
 
   const loadBooks = useCallback(async () => {
     setBooksError(null);
@@ -280,10 +291,12 @@ export default function Home() {
     try {
       const data = await listProblems(nodeId);
       setProblems(data);
+      return data;
     } catch (err) {
       setProblemsError(
         err instanceof Error ? err.message : "Failed to load problems",
       );
+      return [];
     } finally {
       setProblemsLoading(false);
     }
@@ -296,6 +309,19 @@ export default function Home() {
 
     void loadProblems(activeNodeId);
   }, [activeNodeId, loadProblems, modalOpen]);
+
+  useEffect(() => {
+    if (modalOpen) {
+      return;
+    }
+    setExpandedProblemKey(null);
+    setVisibleAnswers({});
+    setHighlightedProblemKey(null);
+    if (highlightTimeoutRef.current) {
+      window.clearTimeout(highlightTimeoutRef.current);
+      highlightTimeoutRef.current = null;
+    }
+  }, [modalOpen]);
 
   useEffect(() => {
     if (!modalOpen) {
@@ -433,6 +459,9 @@ export default function Home() {
       setProblemTitle("");
       setProblemBody("");
       setProblemAnswer("");
+      setExpandedProblemKey(null);
+      setVisibleAnswers({});
+      setHighlightedProblemKey(null);
     },
     [],
   );
@@ -442,18 +471,45 @@ export default function Home() {
       return;
     }
 
+    const titleValue = problemTitle.trim();
     setProblemSaving(true);
     setProblemsError(null);
     try {
-      await createProblem(activeNodeId, {
-        title: problemTitle.trim(),
+      const created = await createProblem(activeNodeId, {
+        title: titleValue,
         bodyMd: problemBody.trim(),
         answerMd: problemAnswer.trim(),
       });
       setProblemTitle("");
       setProblemBody("");
       setProblemAnswer("");
-      await loadProblems(activeNodeId);
+      const nextProblems = await loadProblems(activeNodeId);
+      let focusKey: string | null = null;
+      if (created?.id !== undefined && created?.id !== null) {
+        focusKey = String(created.id);
+      } else {
+        const matchIndex = nextProblems.findIndex(
+          (problem) => problem.content?.title?.trim() === titleValue,
+        );
+        if (matchIndex >= 0) {
+          focusKey = String(nextProblems[matchIndex]?.id ?? `idx-${matchIndex}`);
+        }
+      }
+      setExpandedProblemKey(focusKey);
+      setVisibleAnswers((prev) =>
+        focusKey ? { ...prev, [focusKey]: false } : prev,
+      );
+      if (focusKey) {
+        setHighlightedProblemKey(focusKey);
+        if (highlightTimeoutRef.current) {
+          window.clearTimeout(highlightTimeoutRef.current);
+        }
+        highlightTimeoutRef.current = window.setTimeout(() => {
+          setHighlightedProblemKey((current) =>
+            current === focusKey ? null : current,
+          );
+        }, 2500);
+      }
     } catch (err) {
       setProblemsError(
         err instanceof Error ? err.message : "Failed to add problem",
@@ -472,6 +528,12 @@ export default function Home() {
         ? secondaryNodes
         : [];
   const activeNode = getNodeById(activeNodes, activeNodeId);
+  const getProblemKey = useCallback((problem: Problem, index: number) => {
+    if (problem.id !== undefined && problem.id !== null) {
+      return String(problem.id);
+    }
+    return `idx-${index}`;
+  }, []);
   const {
     viewport: primaryViewport,
     setViewport: setPrimaryViewport,
@@ -1394,29 +1456,87 @@ export default function Home() {
                   <p className="text-xs text-zinc-500">No problems yet.</p>
                 ) : (
                   <ul className="mt-2 space-y-2">
-                    {problems.map((problem, index) => (
-                      <li
-                        key={problem.id ?? `problem-${index}`}
-                        className="rounded-md border border-zinc-100 bg-zinc-50 px-3 py-2"
-                      >
-                        <p className="text-sm font-medium text-zinc-900">
-                          {problem.content?.title ?? "Untitled problem"}
-                        </p>
-                        <p className="text-xs text-zinc-500">
-                          id: {problem.id ?? "-"} · {problem.kind ?? "qa"}
-                        </p>
-                        {problem.content?.body_md ? (
-                          <pre className="mt-2 whitespace-pre-wrap text-xs text-zinc-700">
-                            {problem.content.body_md}
-                          </pre>
-                        ) : null}
-                        {problem.content?.answer_md ? (
-                          <pre className="mt-2 whitespace-pre-wrap text-xs text-emerald-700">
-                            {problem.content.answer_md}
-                          </pre>
-                        ) : null}
-                      </li>
-                    ))}
+                    {problems.map((problem, index) => {
+                      const problemKey = getProblemKey(problem, index);
+                      const isExpanded = expandedProblemKey === problemKey;
+                      const showAnswer = Boolean(visibleAnswers[problemKey]);
+                      const isHighlighted =
+                        highlightedProblemKey === problemKey;
+                      return (
+                        <li
+                          key={problemKey}
+                          className={`rounded-lg border px-3 py-2 transition ${
+                            isHighlighted
+                              ? "border-amber-200 bg-amber-50 shadow-sm"
+                              : "border-zinc-200 bg-white"
+                          } ${isExpanded ? "shadow-sm" : "hover:bg-zinc-50"}`}
+                        >
+                          <button
+                            className="flex w-full items-center justify-between gap-3 text-left"
+                            type="button"
+                            onClick={() =>
+                              setExpandedProblemKey((prev) =>
+                                prev === problemKey ? null : problemKey,
+                              )
+                            }
+                          >
+                            <div>
+                              <p className="text-sm font-semibold text-zinc-900">
+                                {problem.content?.title ?? "Untitled problem"}
+                              </p>
+                              <p className="text-xs text-zinc-500">
+                                id: {problem.id ?? "-"} ·{" "}
+                                {problem.kind ?? "qa"}
+                              </p>
+                            </div>
+                            <span className="text-xs text-zinc-400">
+                              {isExpanded ? "Collapse" : "Expand"}
+                            </span>
+                          </button>
+                          {isExpanded ? (
+                            <div className="mt-3 space-y-4 rounded-lg border border-zinc-100 bg-zinc-50 p-3">
+                              {problem.content?.body_md ? (
+                                <MarkdownContent
+                                  content={problem.content.body_md}
+                                />
+                              ) : (
+                                <p className="text-xs text-zinc-400">
+                                  No body content.
+                                </p>
+                              )}
+                              <div>
+                                <button
+                                  className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700"
+                                  type="button"
+                                  onClick={() =>
+                                    setVisibleAnswers((prev) => ({
+                                      ...prev,
+                                      [problemKey]: !prev[problemKey],
+                                    }))
+                                  }
+                                >
+                                  {showAnswer ? "Hide answer" : "Show answer"}
+                                </button>
+                                {showAnswer ? (
+                                  problem.content?.answer_md ? (
+                                    <div className="mt-3">
+                                      <MarkdownContent
+                                        content={problem.content.answer_md}
+                                        tone="answer"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <p className="mt-3 text-xs text-zinc-400">
+                                      No answer provided.
+                                    </p>
+                                  )
+                                ) : null}
+                              </div>
+                            </div>
+                          ) : null}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
                 {problemsError ? (
