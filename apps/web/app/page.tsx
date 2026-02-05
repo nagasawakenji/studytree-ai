@@ -21,7 +21,7 @@ import {
   moveSubtree,
   type Book,
   type BookNode,
-  type ProblemSummary,
+  type Problem,
 } from "../lib/api";
 import { buildGraphLayout } from "../lib/graphLayout";
 
@@ -179,11 +179,12 @@ export default function Home() {
   const [activeNodeId, setActiveNodeId] = useState<string | number | null>(null);
   const [activeSlot, setActiveSlot] = useState<Slot | null>(null);
 
-  const [problems, setProblems] = useState<ProblemSummary[]>([]);
+  const [problems, setProblems] = useState<Problem[]>([]);
   const [problemsLoading, setProblemsLoading] = useState(false);
   const [problemsError, setProblemsError] = useState<string | null>(null);
   const [problemTitle, setProblemTitle] = useState("");
   const [problemBody, setProblemBody] = useState("");
+  const [problemAnswer, setProblemAnswer] = useState("");
   const [problemSaving, setProblemSaving] = useState(false);
 
   const loadBooks = useCallback(async () => {
@@ -431,12 +432,13 @@ export default function Home() {
       setProblemsError(null);
       setProblemTitle("");
       setProblemBody("");
+      setProblemAnswer("");
     },
     [],
   );
 
   const handleProblemSubmit = useCallback(async () => {
-    if (!activeNodeId || !problemTitle.trim() || !problemBody.trim()) {
+    if (!activeNodeId || !problemTitle.trim()) {
       return;
     }
 
@@ -445,10 +447,12 @@ export default function Home() {
     try {
       await createProblem(activeNodeId, {
         title: problemTitle.trim(),
-        body: problemBody.trim(),
+        bodyMd: problemBody.trim(),
+        answerMd: problemAnswer.trim(),
       });
       setProblemTitle("");
       setProblemBody("");
+      setProblemAnswer("");
       await loadProblems(activeNodeId);
     } catch (err) {
       setProblemsError(
@@ -457,7 +461,7 @@ export default function Home() {
     } finally {
       setProblemSaving(false);
     }
-  }, [activeNodeId, loadProblems, problemBody, problemTitle]);
+  }, [activeNodeId, loadProblems, problemAnswer, problemBody, problemTitle]);
 
   const primaryBook = getBookById(books, primaryBookId);
   const secondaryBook = getBookById(books, secondaryBookId);
@@ -1392,16 +1396,25 @@ export default function Home() {
                   <ul className="mt-2 space-y-2">
                     {problems.map((problem, index) => (
                       <li
-                        key={problem.problem_id ?? `problem-${index}`}
+                        key={problem.id ?? `problem-${index}`}
                         className="rounded-md border border-zinc-100 bg-zinc-50 px-3 py-2"
                       >
                         <p className="text-sm font-medium text-zinc-900">
-                          {problem.intent ?? "Untitled problem"}
+                          {problem.content?.title ?? "Untitled problem"}
                         </p>
                         <p className="text-xs text-zinc-500">
-                          id: {problem.problem_id ?? "-"} ·{problem.format ?? "format"} ·
-                          {problem.difficulty ?? "difficulty"}
+                          id: {problem.id ?? "-"} · {problem.kind ?? "qa"}
                         </p>
+                        {problem.content?.body_md ? (
+                          <pre className="mt-2 whitespace-pre-wrap text-xs text-zinc-700">
+                            {problem.content.body_md}
+                          </pre>
+                        ) : null}
+                        {problem.content?.answer_md ? (
+                          <pre className="mt-2 whitespace-pre-wrap text-xs text-emerald-700">
+                            {problem.content.answer_md}
+                          </pre>
+                        ) : null}
                       </li>
                     ))}
                   </ul>
@@ -1423,9 +1436,15 @@ export default function Home() {
                 />
                 <textarea
                   className="min-h-[120px] w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
-                  placeholder="Problem body"
+                  placeholder="Problem body (Markdown)"
                   value={problemBody}
                   onChange={(event) => setProblemBody(event.target.value)}
+                />
+                <textarea
+                  className="min-h-[80px] w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                  placeholder="Answer (Markdown)"
+                  value={problemAnswer}
+                  onChange={(event) => setProblemAnswer(event.target.value)}
                 />
                 <button
                   className="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
@@ -1434,7 +1453,6 @@ export default function Home() {
                   disabled={
                     problemSaving ||
                     !problemTitle.trim() ||
-                    !problemBody.trim() ||
                     !activeNodeId
                   }
                 >

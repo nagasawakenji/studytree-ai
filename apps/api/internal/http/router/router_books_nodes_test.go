@@ -193,13 +193,18 @@ func (f *fakeNodeRepo) MoveSubtree(_ context.Context, _ string, bookID int64, no
 	return *root, nil
 }
 
+func newProblemUsecaseForTests() *usecase.ProblemUsecase {
+	return usecase.NewProblemUsecase(&fakeProblemRepo{allowAllNodes: true})
+}
+
 func TestBooksAndNodesRoutes(t *testing.T) {
 	log := logger.NewJSONLogger(io.Discard)
 	bookRepo := &fakeBookRepo{}
 	nodeRepo := &fakeNodeRepo{}
 	bookUsecase := usecase.NewBookUsecase(bookRepo)
 	nodeUsecase := usecase.NewNodeUsecase(nodeRepo)
-	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase)
+	problemUsecase := newProblemUsecaseForTests()
+	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase, problemUsecase)
 
 	payload := map[string]string{"title": "My Book"}
 	body, err := json.Marshal(payload)
@@ -305,7 +310,8 @@ func TestPatchNodeUpdatesParentAndOrderIndex(t *testing.T) {
 	nodeRepo := &fakeNodeRepo{}
 	bookUsecase := usecase.NewBookUsecase(bookRepo)
 	nodeUsecase := usecase.NewNodeUsecase(nodeRepo)
-	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase)
+	problemUsecase := newProblemUsecaseForTests()
+	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase, problemUsecase)
 
 	bookBody, err := json.Marshal(map[string]string{"title": "Book"})
 	if err != nil {
@@ -435,7 +441,8 @@ func TestReorderNodesUpdatesOrderIndex(t *testing.T) {
 	nodeRepo := &fakeNodeRepo{}
 	bookUsecase := usecase.NewBookUsecase(bookRepo)
 	nodeUsecase := usecase.NewNodeUsecase(nodeRepo)
-	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase)
+	problemUsecase := newProblemUsecaseForTests()
+	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase, problemUsecase)
 
 	bookBody, err := json.Marshal(map[string]string{"title": "Book"})
 	if err != nil {
@@ -533,7 +540,8 @@ func TestMoveRootNodeToAnotherBook(t *testing.T) {
 	nodeRepo := &fakeNodeRepo{}
 	bookUsecase := usecase.NewBookUsecase(bookRepo)
 	nodeUsecase := usecase.NewNodeUsecase(nodeRepo)
-	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase)
+	problemUsecase := newProblemUsecaseForTests()
+	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase, problemUsecase)
 
 	bookBody, err := json.Marshal(map[string]string{"title": "Book A"})
 	if err != nil {
@@ -665,7 +673,8 @@ func TestMoveNodeUnderDestinationParent(t *testing.T) {
 	nodeRepo := &fakeNodeRepo{}
 	bookUsecase := usecase.NewBookUsecase(bookRepo)
 	nodeUsecase := usecase.NewNodeUsecase(nodeRepo)
-	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase)
+	problemUsecase := newProblemUsecaseForTests()
+	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase, problemUsecase)
 
 	createBook := func(title string) int64 {
 		body, err := json.Marshal(map[string]string{"title": title})
@@ -773,7 +782,8 @@ func TestMoveNodeMovesDescendants(t *testing.T) {
 	nodeRepo := &fakeNodeRepo{}
 	bookUsecase := usecase.NewBookUsecase(bookRepo)
 	nodeUsecase := usecase.NewNodeUsecase(nodeRepo)
-	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase)
+	problemUsecase := newProblemUsecaseForTests()
+	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase, problemUsecase)
 
 	bookBody, err := json.Marshal(map[string]string{"title": "Source"})
 	if err != nil {
