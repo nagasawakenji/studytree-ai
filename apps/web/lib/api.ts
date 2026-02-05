@@ -164,7 +164,7 @@ export async function listAllNodes(
 
 export async function createNode(
   bookId: string | number,
-  payload: Pick<BookNode, "title" | "parent_id">,
+  payload: Pick<BookNode, "title" | "parent_id" | "order_index">,
 ): Promise<BookNode> {
   const response = await fetch(`${API_PREFIX}/books/${bookId}/nodes`, {
     method: "POST",
