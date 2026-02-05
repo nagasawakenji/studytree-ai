@@ -13,6 +13,7 @@ import {
 
 import {
   createBook,
+  createNode,
   createProblem,
   listAllNodes,
   listBooks,
@@ -153,6 +154,26 @@ export default function Home() {
   const [secondarySelectedNodeId, setSecondarySelectedNodeId] = useState<
     string | number | null
   >(null);
+
+  const [chapterPopover, setChapterPopover] = useState<{
+    slot: Slot;
+    title: string;
+  } | null>(null);
+  const [inlineChapter, setInlineChapter] = useState<{
+    slot: Slot;
+    x: number;
+    y: number;
+    title: string;
+  } | null>(null);
+  const [draggingNode, setDraggingNode] = useState<{
+    slot: Slot;
+    nodeId: string | number;
+  } | null>(null);
+  const [dragOverNode, setDragOverNode] = useState<{
+    slot: Slot;
+    nodeId: string | number;
+  } | null>(null);
+  const [rootDragActive, setRootDragActive] = useState<Slot | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [activeNodeId, setActiveNodeId] = useState<string | number | null>(null);
@@ -459,6 +480,8 @@ export default function Home() {
     onMouseDown: onSecondaryMouseDown,
     onWheel: onSecondaryWheel,
   } = usePanZoom();
+  const primaryCanvasRef = useRef<HTMLDivElement | null>(null);
+  const secondaryCanvasRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setPrimaryViewport({ x: 0, y: 0, scale: 1 });
@@ -467,6 +490,90 @@ export default function Home() {
   useEffect(() => {
     setSecondaryViewport({ x: 0, y: 0, scale: 1 });
   }, [secondaryBookId, setSecondaryViewport]);
+
+  useEffect(() => {
+    setChapterPopover((prev) => (prev?.slot === "primary" ? null : prev));
+    setInlineChapter((prev) => (prev?.slot === "primary" ? null : prev));
+  }, [primaryBookId]);
+
+  useEffect(() => {
+    setChapterPopover((prev) => (prev?.slot === "secondary" ? null : prev));
+    setInlineChapter((prev) => (prev?.slot === "secondary" ? null : prev));
+  }, [secondaryBookId]);
+
+  const getRootCount = useCallback(
+    (slot: Slot) => {
+      const nodes = slot === "primary" ? primaryNodes : secondaryNodes;
+      return nodes.filter(
+        (node) => node.parent_id === null || node.parent_id === undefined,
+      ).length;
+    },
+    [primaryNodes, secondaryNodes],
+  );
+
+  const handleCreateChapter = useCallback(
+    async (slot: Slot, rawTitle: string) => {
+      const titleValue = rawTitle.trim();
+      const bookId = slot === "primary" ? primaryBookId : secondaryBookId;
+      const setError =
+        slot === "primary" ? setPrimaryNodesError : setSecondaryNodesError;
+
+      if (!bookId || !titleValue) {
+        return;
+      }
+
+      setError(null);
+      try {
+        await createNode(bookId, {
+          parent_id: null,
+          order_index: getRootCount(slot),
+          title: titleValue,
+        });
+        await refreshBookNodes(bookId);
+        setChapterPopover((prev) => (prev?.slot === slot ? null : prev));
+        setInlineChapter((prev) => (prev?.slot === slot ? null : prev));
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to create chapter",
+        );
+      }
+    },
+    [
+      getRootCount,
+      primaryBookId,
+      refreshBookNodes,
+      secondaryBookId,
+    ],
+  );
+
+  const handleCanvasDoubleClick = useCallback(
+    (slot: Slot, event: MouseEvent<HTMLDivElement>) => {
+      const bookId = slot === "primary" ? primaryBookId : secondaryBookId;
+      if (!bookId) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("[data-node-card='true']")) {
+        return;
+      }
+      const container =
+        slot === "primary"
+          ? primaryCanvasRef.current
+          : secondaryCanvasRef.current;
+      if (!container) {
+        return;
+      }
+      const rect = container.getBoundingClientRect();
+      setInlineChapter({
+        slot,
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+        title: "",
+      });
+      setChapterPopover(null);
+    },
+    [primaryBookId, secondaryBookId],
+  );
 
   return (
     <div className="flex min-h-screen bg-zinc-950 text-zinc-100">
@@ -594,7 +701,7 @@ export default function Home() {
         </div>
       </aside>
 
-      <main className="flex-1 bg-zinc-50 p-8 text-zinc-900">
+      <main className="flex-1 bg-neutral-50 p-8 text-zinc-900">
         <div className="mx-auto flex h-full max-w-6xl flex-col gap-6">
           <header className="space-y-1">
             <h2 className="text-2xl font-semibold">Dual Book Trees</h2>
@@ -609,7 +716,7 @@ export default function Home() {
               secondaryBookId ? "lg:grid-cols-2" : "lg:grid-cols-1"
             }`}
           >
-            <section className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+            <section className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h3 className="text-lg font-semibold">Primary tree</h3>
@@ -617,30 +724,111 @@ export default function Home() {
                     {primaryBook?.title ?? "Select a book"}
                   </p>
                 </div>
-                {primaryBookId ? (
-                  <button
-                    className="text-xs text-zinc-500 underline"
-                    type="button"
-                    onClick={() =>
-                      primaryBookId && void loadNodes(primaryBookId, "primary")
-                    }
-                  >
-                    Refresh nodes
-                  </button>
-                ) : null}
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <button
+                      className="rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs font-medium text-neutral-700 shadow-sm disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
+                      type="button"
+                      onClick={() =>
+                        setChapterPopover({ slot: "primary", title: "" })
+                      }
+                      disabled={!primaryBookId}
+                    >
+                      + Chapter
+                    </button>
+                    {chapterPopover?.slot === "primary" ? (
+                      <div className="absolute right-0 top-full z-20 mt-2 w-56 rounded-xl border border-neutral-200 bg-white p-3 shadow-lg">
+                        <input
+                          className="w-full rounded-lg border border-neutral-200 px-2 py-1 text-xs"
+                          placeholder="Chapter title"
+                          value={chapterPopover.title}
+                          onChange={(event) =>
+                            setChapterPopover({
+                              slot: "primary",
+                              title: event.target.value,
+                            })
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              void handleCreateChapter(
+                                "primary",
+                                chapterPopover.title,
+                              );
+                            }
+                            if (event.key === "Escape") {
+                              setChapterPopover(null);
+                            }
+                          }}
+                        />
+                        <button
+                          className="mt-2 w-full rounded-lg bg-neutral-900 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                          type="button"
+                          onClick={() =>
+                            void handleCreateChapter(
+                              "primary",
+                              chapterPopover.title,
+                            )
+                          }
+                          disabled={!chapterPopover.title.trim()}
+                        >
+                          Create
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  {primaryBookId ? (
+                    <button
+                      className="text-xs text-zinc-500 underline"
+                      type="button"
+                      onClick={() =>
+                        primaryBookId && void loadNodes(primaryBookId, "primary")
+                      }
+                    >
+                      Refresh nodes
+                    </button>
+                  ) : null}
+                </div>
               </div>
 
               <div
-                className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-3 text-xs text-zinc-500"
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) =>
-                  handleDropNode(event, primaryBookId, null, setPrimaryNodesError)
+                ref={primaryCanvasRef}
+                className="relative h-[420px] overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50 text-sm"
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  const target = event.target as HTMLElement | null;
+                  if (target?.closest("[data-node-card='true']")) {
+                    if (rootDragActive === "primary") {
+                      setRootDragActive(null);
+                    }
+                    return;
+                  }
+                  setRootDragActive("primary");
+                }}
+                onDragLeave={(event) => {
+                  if (event.currentTarget === event.target) {
+                    setRootDragActive(null);
+                  }
+                }}
+                onDrop={(event) => {
+                  const target = event.target as HTMLElement | null;
+                  setRootDragActive(null);
+                  if (target?.closest("[data-node-card='true']")) {
+                    return;
+                  }
+                  handleDropNode(
+                    event,
+                    primaryBookId,
+                    null,
+                    setPrimaryNodesError,
+                  );
+                }}
+                onDoubleClick={(event) =>
+                  handleCanvasDoubleClick("primary", event)
                 }
               >
-                Root drop area
-              </div>
-
-              <div className="relative h-[420px] overflow-hidden rounded-lg border border-zinc-100 bg-zinc-50 text-sm">
+                {rootDragActive === "primary" ? (
+                  <div className="pointer-events-none absolute inset-0 z-10 rounded-xl bg-indigo-100/60" />
+                ) : null}
                 {primaryBookId === null ? (
                   <div className="flex h-full items-center justify-center text-zinc-500">
                     Select a book to view nodes.
@@ -684,7 +872,7 @@ export default function Home() {
                               y1={startY}
                               x2={endX}
                               y2={endY}
-                              stroke="#d4d4d8"
+                              stroke="#e5e7eb"
                               strokeWidth={2}
                             />
                           );
@@ -694,14 +882,28 @@ export default function Home() {
                         const isSelected =
                           primarySelectedNodeId !== null &&
                           String(primarySelectedNodeId) === graphNode.id;
+                        const isDragging =
+                          draggingNode?.slot === "primary" &&
+                          String(draggingNode.nodeId) === graphNode.id;
+                        const isDropTarget =
+                          dragOverNode?.slot === "primary" &&
+                          String(dragOverNode.nodeId) === graphNode.id;
                         return (
                           <button
                             key={graphNode.id}
                             data-node-card="true"
-                            className={`absolute rounded-lg border px-3 py-2 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-zinc-400 ${
+                            className={`absolute rounded-xl border px-4 py-3 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-neutral-400 ${
                               isSelected
-                                ? "border-zinc-900 bg-zinc-900 text-white"
-                                : "border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50"
+                                ? "border-neutral-900 bg-neutral-900 text-white"
+                                : "border-neutral-200 bg-white text-zinc-900 hover:bg-neutral-50"
+                            } ${
+                              isDragging
+                                ? "scale-[1.02] shadow-lg"
+                                : "hover:shadow-md"
+                            } ${
+                              isDropTarget && !isSelected
+                                ? "ring-2 ring-indigo-300 bg-indigo-50"
+                                : ""
                             }`}
                             style={{
                               left: graphNode.x,
@@ -715,6 +917,10 @@ export default function Home() {
                               if (!graphNode.node.id || !primaryBookId) {
                                 return;
                               }
+                              setDraggingNode({
+                                slot: "primary",
+                                nodeId: graphNode.node.id,
+                              });
                               event.dataTransfer.setData(
                                 "application/json",
                                 JSON.stringify({
@@ -723,6 +929,11 @@ export default function Home() {
                                 }),
                               );
                               event.dataTransfer.effectAllowed = "move";
+                            }}
+                            onDragEnd={() => {
+                              setDraggingNode(null);
+                              setDragOverNode(null);
+                              setRootDragActive(null);
                             }}
                             onClick={() => {
                               if (
@@ -736,25 +947,83 @@ export default function Home() {
                                 );
                               }
                             }}
-                            onDragOver={(event) => event.preventDefault()}
-                            onDrop={(event) =>
+                            onDragOver={(event) => {
+                              event.preventDefault();
+                              setRootDragActive(null);
+                              if (
+                                graphNode.node.id === null ||
+                                graphNode.node.id === undefined
+                              ) {
+                                return;
+                              }
+                              setDragOverNode({
+                                slot: "primary",
+                                nodeId: graphNode.node.id,
+                              });
+                            }}
+                            onDragLeave={() => {
+                              setDragOverNode((prev) =>
+                                prev?.slot === "primary" &&
+                                String(prev.nodeId) === graphNode.id
+                                  ? null
+                                  : prev,
+                              );
+                            }}
+                            onDrop={(event) => {
+                              setDragOverNode(null);
                               handleDropNode(
                                 event,
                                 primaryBookId,
                                 graphNode.node.id ?? null,
                                 setPrimaryNodesError,
-                              )
-                            }
+                              );
+                            }}
                           >
-                            <div className="font-medium">
+                            <div className="text-sm font-semibold">
                               {graphNode.node.title}
                             </div>
-                            <div className="text-xs text-zinc-500">
+                            <div className="text-[11px] text-neutral-400">
                               id: {graphNode.node.id ?? "-"}
                             </div>
                           </button>
                         );
                       })}
+                      {inlineChapter?.slot === "primary" ? (
+                        <div
+                          className="absolute z-20"
+                          style={{
+                            left: inlineChapter.x,
+                            top: inlineChapter.y,
+                          }}
+                        >
+                          <input
+                            className="w-52 rounded-lg border border-neutral-200 bg-white px-2 py-1 text-xs shadow-lg"
+                            placeholder="New chapter"
+                            autoFocus
+                            value={inlineChapter.title}
+                            onChange={(event) =>
+                              setInlineChapter({
+                                slot: "primary",
+                                x: inlineChapter.x,
+                                y: inlineChapter.y,
+                                title: event.target.value,
+                              })
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                void handleCreateChapter(
+                                  "primary",
+                                  inlineChapter.title,
+                                );
+                              }
+                              if (event.key === "Escape") {
+                                setInlineChapter(null);
+                              }
+                            }}
+                            onBlur={() => setInlineChapter(null)}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 )}
@@ -765,7 +1034,7 @@ export default function Home() {
             </section>
 
             {secondaryBookId ? (
-              <section className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+              <section className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3 className="text-lg font-semibold">Secondary tree</h3>
@@ -773,36 +1042,112 @@ export default function Home() {
                       {secondaryBook?.title ?? "Select a book"}
                     </p>
                   </div>
-                  {secondaryBookId ? (
-                    <button
-                      className="text-xs text-zinc-500 underline"
-                      type="button"
-                      onClick={() =>
-                        secondaryBookId &&
-                        void loadNodes(secondaryBookId, "secondary")
-                      }
-                    >
-                      Refresh nodes
-                    </button>
-                  ) : null}
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <button
+                        className="rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs font-medium text-neutral-700 shadow-sm disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
+                        type="button"
+                        onClick={() =>
+                          setChapterPopover({ slot: "secondary", title: "" })
+                        }
+                        disabled={!secondaryBookId}
+                      >
+                        + Chapter
+                      </button>
+                      {chapterPopover?.slot === "secondary" ? (
+                        <div className="absolute right-0 top-full z-20 mt-2 w-56 rounded-xl border border-neutral-200 bg-white p-3 shadow-lg">
+                          <input
+                            className="w-full rounded-lg border border-neutral-200 px-2 py-1 text-xs"
+                            placeholder="Chapter title"
+                            value={chapterPopover.title}
+                            onChange={(event) =>
+                              setChapterPopover({
+                                slot: "secondary",
+                                title: event.target.value,
+                              })
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                void handleCreateChapter(
+                                  "secondary",
+                                  chapterPopover.title,
+                                );
+                              }
+                              if (event.key === "Escape") {
+                                setChapterPopover(null);
+                              }
+                            }}
+                          />
+                          <button
+                            className="mt-2 w-full rounded-lg bg-neutral-900 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                            type="button"
+                            onClick={() =>
+                              void handleCreateChapter(
+                                "secondary",
+                                chapterPopover.title,
+                              )
+                            }
+                            disabled={!chapterPopover.title.trim()}
+                          >
+                            Create
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                    {secondaryBookId ? (
+                      <button
+                        className="text-xs text-zinc-500 underline"
+                        type="button"
+                        onClick={() =>
+                          secondaryBookId &&
+                          void loadNodes(secondaryBookId, "secondary")
+                        }
+                      >
+                        Refresh nodes
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div
-                  className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-3 text-xs text-zinc-500"
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) =>
+                  ref={secondaryCanvasRef}
+                  className="relative h-[420px] overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50 text-sm"
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    const target = event.target as HTMLElement | null;
+                    if (target?.closest("[data-node-card='true']")) {
+                      if (rootDragActive === "secondary") {
+                        setRootDragActive(null);
+                      }
+                      return;
+                    }
+                    setRootDragActive("secondary");
+                  }}
+                  onDragLeave={(event) => {
+                    if (event.currentTarget === event.target) {
+                      setRootDragActive(null);
+                    }
+                  }}
+                  onDrop={(event) => {
+                    const target = event.target as HTMLElement | null;
+                    setRootDragActive(null);
+                    if (target?.closest("[data-node-card='true']")) {
+                      return;
+                    }
                     handleDropNode(
                       event,
                       secondaryBookId,
                       null,
                       setSecondaryNodesError,
-                    )
+                    );
+                  }}
+                  onDoubleClick={(event) =>
+                    handleCanvasDoubleClick("secondary", event)
                   }
                 >
-                  Root drop area
-                </div>
-
-                <div className="relative h-[420px] overflow-hidden rounded-lg border border-zinc-100 bg-zinc-50 text-sm">
+                  {rootDragActive === "secondary" ? (
+                    <div className="pointer-events-none absolute inset-0 z-10 rounded-xl bg-indigo-100/60" />
+                  ) : null}
                   {secondaryBookId === null ? (
                     <div className="flex h-full items-center justify-center text-zinc-500">
                       Select a book to view nodes.
@@ -846,7 +1191,7 @@ export default function Home() {
                                 y1={startY}
                                 x2={endX}
                                 y2={endY}
-                                stroke="#d4d4d8"
+                                stroke="#e5e7eb"
                                 strokeWidth={2}
                               />
                             );
@@ -856,14 +1201,28 @@ export default function Home() {
                           const isSelected =
                             secondarySelectedNodeId !== null &&
                             String(secondarySelectedNodeId) === graphNode.id;
+                          const isDragging =
+                            draggingNode?.slot === "secondary" &&
+                            String(draggingNode.nodeId) === graphNode.id;
+                          const isDropTarget =
+                            dragOverNode?.slot === "secondary" &&
+                            String(dragOverNode.nodeId) === graphNode.id;
                           return (
                             <button
                               key={graphNode.id}
                               data-node-card="true"
-                              className={`absolute rounded-lg border px-3 py-2 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-zinc-400 ${
+                              className={`absolute rounded-xl border px-4 py-3 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-neutral-400 ${
                                 isSelected
-                                  ? "border-zinc-900 bg-zinc-900 text-white"
-                                  : "border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50"
+                                  ? "border-neutral-900 bg-neutral-900 text-white"
+                                  : "border-neutral-200 bg-white text-zinc-900 hover:bg-neutral-50"
+                              } ${
+                                isDragging
+                                  ? "scale-[1.02] shadow-lg"
+                                  : "hover:shadow-md"
+                              } ${
+                                isDropTarget && !isSelected
+                                  ? "ring-2 ring-indigo-300 bg-indigo-50"
+                                  : ""
                               }`}
                               style={{
                                 left: graphNode.x,
@@ -879,6 +1238,10 @@ export default function Home() {
                                 if (!graphNode.node.id || !secondaryBookId) {
                                   return;
                                 }
+                                setDraggingNode({
+                                  slot: "secondary",
+                                  nodeId: graphNode.node.id,
+                                });
                                 event.dataTransfer.setData(
                                   "application/json",
                                   JSON.stringify({
@@ -887,6 +1250,11 @@ export default function Home() {
                                   }),
                                 );
                                 event.dataTransfer.effectAllowed = "move";
+                              }}
+                              onDragEnd={() => {
+                                setDraggingNode(null);
+                                setDragOverNode(null);
+                                setRootDragActive(null);
                               }}
                               onClick={() => {
                                 if (
@@ -902,25 +1270,83 @@ export default function Home() {
                                   );
                                 }
                               }}
-                              onDragOver={(event) => event.preventDefault()}
-                              onDrop={(event) =>
+                              onDragOver={(event) => {
+                                event.preventDefault();
+                                setRootDragActive(null);
+                                if (
+                                  graphNode.node.id === null ||
+                                  graphNode.node.id === undefined
+                                ) {
+                                  return;
+                                }
+                                setDragOverNode({
+                                  slot: "secondary",
+                                  nodeId: graphNode.node.id,
+                                });
+                              }}
+                              onDragLeave={() => {
+                                setDragOverNode((prev) =>
+                                  prev?.slot === "secondary" &&
+                                  String(prev.nodeId) === graphNode.id
+                                    ? null
+                                    : prev,
+                                );
+                              }}
+                              onDrop={(event) => {
+                                setDragOverNode(null);
                                 handleDropNode(
                                   event,
                                   secondaryBookId,
                                   graphNode.node.id ?? null,
                                   setSecondaryNodesError,
-                                )
-                              }
+                                );
+                              }}
                             >
-                              <div className="font-medium">
+                              <div className="text-sm font-semibold">
                                 {graphNode.node.title}
                               </div>
-                              <div className="text-xs text-zinc-500">
+                              <div className="text-[11px] text-neutral-400">
                                 id: {graphNode.node.id ?? "-"}
                               </div>
                             </button>
                           );
                         })}
+                        {inlineChapter?.slot === "secondary" ? (
+                          <div
+                            className="absolute z-20"
+                            style={{
+                              left: inlineChapter.x,
+                              top: inlineChapter.y,
+                            }}
+                          >
+                            <input
+                              className="w-52 rounded-lg border border-neutral-200 bg-white px-2 py-1 text-xs shadow-lg"
+                              placeholder="New chapter"
+                              autoFocus
+                              value={inlineChapter.title}
+                              onChange={(event) =>
+                                setInlineChapter({
+                                  slot: "secondary",
+                                  x: inlineChapter.x,
+                                  y: inlineChapter.y,
+                                  title: event.target.value,
+                                })
+                              }
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  void handleCreateChapter(
+                                    "secondary",
+                                    inlineChapter.title,
+                                  );
+                                }
+                                if (event.key === "Escape") {
+                                  setInlineChapter(null);
+                                }
+                              }}
+                              onBlur={() => setInlineChapter(null)}
+                            />
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   )}
