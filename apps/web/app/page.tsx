@@ -24,7 +24,7 @@ import {
   type Problem,
 } from "../lib/api";
 import { buildGraphLayout } from "../lib/graphLayout";
-import { MarkdownContent } from "../lib/markdown";
+import Link from "next/link";
 
 type Slot = "primary" | "secondary";
 
@@ -176,7 +176,6 @@ export default function Home() {
   } | null>(null);
   const [rootDragActive, setRootDragActive] = useState<Slot | null>(null);
 
-  const [modalOpen, setModalOpen] = useState(false);
   const [activeNodeId, setActiveNodeId] = useState<string | number | null>(null);
   const [activeSlot, setActiveSlot] = useState<Slot | null>(null);
 
@@ -187,12 +186,6 @@ export default function Home() {
   const [problemBody, setProblemBody] = useState("");
   const [problemAnswer, setProblemAnswer] = useState("");
   const [problemSaving, setProblemSaving] = useState(false);
-  const [expandedProblemKey, setExpandedProblemKey] = useState<string | null>(
-    null,
-  );
-  const [visibleAnswers, setVisibleAnswers] = useState<
-    Record<string, boolean>
-  >({});
   const [highlightedProblemKey, setHighlightedProblemKey] = useState<
     string | null
   >(null);
@@ -303,40 +296,15 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!modalOpen || !activeNodeId) {
+    if (!activeNodeId) {
+      setProblems([]);
+      setProblemsError(null);
+      setProblemsLoading(false);
       return;
     }
 
     void loadProblems(activeNodeId);
-  }, [activeNodeId, loadProblems, modalOpen]);
-
-  useEffect(() => {
-    if (modalOpen) {
-      return;
-    }
-    setExpandedProblemKey(null);
-    setVisibleAnswers({});
-    setHighlightedProblemKey(null);
-    if (highlightTimeoutRef.current) {
-      window.clearTimeout(highlightTimeoutRef.current);
-      highlightTimeoutRef.current = null;
-    }
-  }, [modalOpen]);
-
-  useEffect(() => {
-    if (!modalOpen) {
-      return;
-    }
-
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setModalOpen(false);
-      }
-    };
-
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [modalOpen]);
+  }, [activeNodeId, loadProblems]);
 
   const refreshBookNodes = useCallback(
     async (bookId: string | number) => {
@@ -449,19 +417,20 @@ export default function Home() {
     [secondaryNodes],
   );
 
-  const openProblemsModal = useCallback(
+  const openProblemsPane = useCallback(
     (slot: Slot, nodeId: string | number) => {
       setActiveSlot(slot);
       setActiveNodeId(nodeId);
-      setModalOpen(true);
       setProblems([]);
       setProblemsError(null);
       setProblemTitle("");
       setProblemBody("");
       setProblemAnswer("");
-      setExpandedProblemKey(null);
-      setVisibleAnswers({});
       setHighlightedProblemKey(null);
+      if (highlightTimeoutRef.current) {
+        window.clearTimeout(highlightTimeoutRef.current);
+        highlightTimeoutRef.current = null;
+      }
     },
     [],
   );
@@ -495,10 +464,6 @@ export default function Home() {
           focusKey = String(nextProblems[matchIndex]?.id ?? `idx-${matchIndex}`);
         }
       }
-      setExpandedProblemKey(focusKey);
-      setVisibleAnswers((prev) =>
-        focusKey ? { ...prev, [focusKey]: false } : prev,
-      );
       if (focusKey) {
         setHighlightedProblemKey(focusKey);
         if (highlightTimeoutRef.current) {
@@ -533,6 +498,28 @@ export default function Home() {
       return String(problem.id);
     }
     return `idx-${index}`;
+  }, []);
+  const getProblemPreview = useCallback((problem: Problem) => {
+    const content = (problem.content ?? {}) as Record<string, unknown>;
+    const raw =
+      (typeof content.body_md === "string" && content.body_md) ||
+      (typeof content.stem_md === "string" && content.stem_md) ||
+      (typeof content.body === "string" && content.body) ||
+      (typeof content.stem === "string" && content.stem) ||
+      "";
+    if (!raw.trim()) {
+      return "";
+    }
+    const cleaned = raw
+      .replace(/\r\n/g, "\n")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join(" ");
+    if (cleaned.length <= 180) {
+      return cleaned;
+    }
+    return `${cleaned.slice(0, 180)}…`;
   }, []);
   const {
     viewport: primaryViewport,
@@ -772,16 +759,17 @@ export default function Home() {
           <header className="space-y-1">
             <h2 className="text-2xl font-semibold">Dual Book Trees</h2>
             <p className="text-sm text-zinc-500">
-              Drag a node across books to reparent. Click a node to open
-              problems instantly.
+              Drag a node across books to reparent. Click a node to load its
+              problems in the side panel.
             </p>
           </header>
 
-          <div
-            className={`grid gap-6 ${
-              secondaryBookId ? "lg:grid-cols-2" : "lg:grid-cols-1"
-            }`}
-          >
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div
+              className={`grid gap-6 ${
+                secondaryBookId ? "lg:grid-cols-2" : "lg:grid-cols-1"
+              }`}
+            >
             <section className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -1007,7 +995,7 @@ export default function Home() {
                                 graphNode.node.id !== null
                               ) {
                                 setPrimarySelectedNodeId(graphNode.node.id);
-                                openProblemsModal(
+                                openProblemsPane(
                                   "primary",
                                   graphNode.node.id,
                                 );
@@ -1330,7 +1318,7 @@ export default function Home() {
                                   setSecondarySelectedNodeId(
                                     graphNode.node.id,
                                   );
-                                  openProblemsModal(
+                                  openProblemsPane(
                                     "secondary",
                                     graphNode.node.id,
                                   );
@@ -1422,167 +1410,153 @@ export default function Home() {
                 ) : null}
               </section>
             ) : null}
-          </div>
-        </div>
-      </main>
-
-      {modalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6">
-          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 text-zinc-900 shadow-xl">
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="text-lg font-semibold">Problems</h3>
-                <p className="text-xs text-zinc-500">
-                  {activeNode?.title ?? "Untitled node"} · id: {activeNodeId ?? "-"}
-                </p>
-              </div>
-              <button
-                className="text-sm text-zinc-500"
-                type="button"
-                onClick={() => setModalOpen(false)}
-              >
-                ✕
-              </button>
             </div>
 
-            <div className="mt-4 space-y-3">
-              <div>
-                <h4 className="text-xs font-semibold text-zinc-600">
-                  Existing problems
-                </h4>
-                {problemsLoading ? (
-                  <p className="text-xs text-zinc-500">Loading problems...</p>
-                ) : problems.length === 0 ? (
-                  <p className="text-xs text-zinc-500">No problems yet.</p>
-                ) : (
-                  <ul className="mt-2 space-y-2">
-                    {problems.map((problem, index) => {
-                      const problemKey = getProblemKey(problem, index);
-                      const isExpanded = expandedProblemKey === problemKey;
-                      const showAnswer = Boolean(visibleAnswers[problemKey]);
-                      const isHighlighted =
-                        highlightedProblemKey === problemKey;
-                      return (
-                        <li
-                          key={problemKey}
-                          className={`rounded-lg border px-3 py-2 transition ${
-                            isHighlighted
-                              ? "border-amber-200 bg-amber-50 shadow-sm"
-                              : "border-zinc-200 bg-white"
-                          } ${isExpanded ? "shadow-sm" : "hover:bg-zinc-50"}`}
-                        >
-                          <button
-                            className="flex w-full items-center justify-between gap-3 text-left"
-                            type="button"
-                            onClick={() =>
-                              setExpandedProblemKey((prev) =>
-                                prev === problemKey ? null : problemKey,
-                              )
-                            }
-                          >
-                            <div>
-                              <p className="text-sm font-semibold text-zinc-900">
-                                {problem.content?.title ?? "Untitled problem"}
-                              </p>
-                              <p className="text-xs text-zinc-500">
-                                id: {problem.id ?? "-"} ·{" "}
-                                {problem.kind ?? "qa"}
-                              </p>
-                            </div>
-                            <span className="text-xs text-zinc-400">
-                              {isExpanded ? "Collapse" : "Expand"}
-                            </span>
-                          </button>
-                          {isExpanded ? (
-                            <div className="mt-3 space-y-4 rounded-lg border border-zinc-100 bg-zinc-50 p-3">
-                              {problem.content?.body_md ? (
-                                <MarkdownContent
-                                  content={problem.content.body_md}
-                                />
-                              ) : (
-                                <p className="text-xs text-zinc-400">
-                                  No body content.
-                                </p>
-                              )}
-                              <div>
-                                <button
-                                  className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700"
-                                  type="button"
-                                  onClick={() =>
-                                    setVisibleAnswers((prev) => ({
-                                      ...prev,
-                                      [problemKey]: !prev[problemKey],
-                                    }))
-                                  }
-                                >
-                                  {showAnswer ? "Hide answer" : "Show answer"}
-                                </button>
-                                {showAnswer ? (
-                                  problem.content?.answer_md ? (
-                                    <div className="mt-3">
-                                      <MarkdownContent
-                                        content={problem.content.answer_md}
-                                        tone="answer"
-                                      />
-                                    </div>
-                                  ) : (
-                                    <p className="mt-3 text-xs text-zinc-400">
-                                      No answer provided.
-                                    </p>
-                                  )
-                                ) : null}
-                              </div>
-                            </div>
-                          ) : null}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-                {problemsError ? (
-                  <p className="text-xs text-red-600">{problemsError}</p>
+            <section className="flex min-h-[420px] flex-col rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold">Problems</h3>
+                  <p className="text-xs text-zinc-500">
+                    {activeNode
+                      ? `${activeNode.title} · id: ${activeNodeId ?? "-"}`
+                      : "Select a chapter node to view its problems."}
+                  </p>
+                </div>
+                {activeNodeId ? (
+                  <button
+                    className="text-xs text-zinc-500 underline"
+                    type="button"
+                    onClick={() => {
+                      setActiveNodeId(null);
+                      setActiveSlot(null);
+                    }}
+                  >
+                    Clear
+                  </button>
                 ) : null}
               </div>
 
-              <div className="space-y-2">
-                <h4 className="text-xs font-semibold text-zinc-600">
-                  Add problem
-                </h4>
-                <input
-                  className="w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
-                  placeholder="Problem title"
-                  value={problemTitle}
-                  onChange={(event) => setProblemTitle(event.target.value)}
-                />
-                <textarea
-                  className="min-h-[120px] w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
-                  placeholder="Problem body (Markdown)"
-                  value={problemBody}
-                  onChange={(event) => setProblemBody(event.target.value)}
-                />
-                <textarea
-                  className="min-h-[80px] w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
-                  placeholder="Answer (Markdown)"
-                  value={problemAnswer}
-                  onChange={(event) => setProblemAnswer(event.target.value)}
-                />
-                <button
-                  className="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
-                  type="button"
-                  onClick={() => void handleProblemSubmit()}
-                  disabled={
-                    problemSaving ||
-                    !problemTitle.trim() ||
-                    !activeNodeId
-                  }
-                >
-                  {problemSaving ? "Saving..." : "Add problem"}
-                </button>
+              <div className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+                <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                  <h4 className="text-xs font-semibold text-zinc-600">
+                    Existing problems
+                  </h4>
+                  {!activeNodeId ? (
+                    <p className="mt-2 text-xs text-zinc-500">
+                      Choose a node on the left to see the problem list.
+                    </p>
+                  ) : problemsLoading ? (
+                    <p className="mt-2 text-xs text-zinc-500">
+                      Loading problems...
+                    </p>
+                  ) : problems.length === 0 ? (
+                    <p className="mt-2 text-xs text-zinc-500">
+                      No problems yet.
+                    </p>
+                  ) : (
+                    <ul className="mt-2 space-y-2">
+                      {problems.map((problem, index) => {
+                        const problemKey = getProblemKey(problem, index);
+                        const isHighlighted =
+                          highlightedProblemKey === problemKey;
+                        const preview = getProblemPreview(problem);
+                        const problemHref =
+                          problem.id !== undefined && problem.id !== null
+                            ? `/problems/${problem.id}`
+                            : null;
+                        return (
+                          <li
+                            key={problemKey}
+                            className={`rounded-lg border px-3 py-2 transition ${
+                              isHighlighted
+                                ? "border-amber-200 bg-amber-50 shadow-sm"
+                                : "border-zinc-200 bg-white hover:bg-zinc-50"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-zinc-900">
+                                  {problem.content?.title ?? "Untitled problem"}
+                                </p>
+                                <p className="text-xs text-zinc-500">
+                                  id: {problem.id ?? "-"} ·{" "}
+                                  {problem.kind ?? "qa"}
+                                </p>
+                              </div>
+                              {problemHref ? (
+                                <Link
+                                  className="rounded-md border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
+                                  href={problemHref}
+                                >
+                                  Open
+                                </Link>
+                              ) : (
+                                <span className="text-xs text-zinc-400">
+                                  No ID
+                                </span>
+                              )}
+                            </div>
+                            {preview ? (
+                              <p className="mt-2 text-xs text-zinc-600">
+                                {preview}
+                              </p>
+                            ) : (
+                              <p className="mt-2 text-xs text-zinc-400">
+                                No preview available.
+                              </p>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  {problemsError ? (
+                    <p className="mt-2 text-xs text-red-600">
+                      {problemsError}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="space-y-2 border-t border-zinc-100 pt-4">
+                  <h4 className="text-xs font-semibold text-zinc-600">
+                    New problem
+                  </h4>
+                  <input
+                    className="w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                    placeholder="Problem title"
+                    value={problemTitle}
+                    onChange={(event) => setProblemTitle(event.target.value)}
+                  />
+                  <textarea
+                    className="min-h-[120px] w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                    placeholder="Problem body (Markdown)"
+                    value={problemBody}
+                    onChange={(event) => setProblemBody(event.target.value)}
+                  />
+                  <textarea
+                    className="min-h-[80px] w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                    placeholder="Answer (Markdown)"
+                    value={problemAnswer}
+                    onChange={(event) => setProblemAnswer(event.target.value)}
+                  />
+                  <button
+                    className="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
+                    type="button"
+                    onClick={() => void handleProblemSubmit()}
+                    disabled={
+                      problemSaving ||
+                      !problemTitle.trim() ||
+                      !activeNodeId
+                    }
+                  >
+                    {problemSaving ? "Saving..." : "Add problem"}
+                  </button>
+                </div>
               </div>
-            </div>
+            </section>
           </div>
         </div>
-      ) : null}
+      </main>
     </div>
   );
 }

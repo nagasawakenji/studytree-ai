@@ -55,6 +55,30 @@ func (r *ProblemRepository) ListByNode(ctx context.Context, userID string, nodeI
 	return problems, nil
 }
 
+// GetByID returns a single problem for a user.
+func (r *ProblemRepository) GetByID(ctx context.Context, userID string, problemID int64) (usecase.Problem, error) {
+	if r.pool == nil {
+		return usecase.Problem{}, errors.New("database not configured")
+	}
+
+	var problem usecase.Problem
+	var content json.RawMessage
+	row := r.pool.QueryRow(ctx, `
+		SELECT id, node_id, kind, schema_ver, content, created_at, updated_at
+		FROM problems
+		WHERE user_id = $1 AND id = $2
+	`, userID, problemID)
+	if err := row.Scan(&problem.ID, &problem.NodeID, &problem.Kind, &problem.SchemaVer, &content, &problem.CreatedAt, &problem.UpdatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return usecase.Problem{}, usecase.ErrProblemNotFound
+		}
+		return usecase.Problem{}, err
+	}
+	problem.Content = content
+
+	return problem, nil
+}
+
 // Create inserts a problem for a user and node.
 func (r *ProblemRepository) Create(ctx context.Context, userID string, nodeID int64, kind string, schemaVer int, content json.RawMessage) (usecase.Problem, error) {
 	if r.pool == nil {

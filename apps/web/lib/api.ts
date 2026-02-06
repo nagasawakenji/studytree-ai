@@ -14,6 +14,11 @@ export type ProblemContent = {
   title: string;
   body_md?: string;
   answer_md?: string;
+  explanation_md?: string;
+  stem_md?: string;
+  body?: string;
+  answer?: string;
+  explanation?: string;
 };
 
 export type Problem = {
@@ -236,6 +241,23 @@ export async function createProblem(
         answer_md: payload.answerMd ?? "",
       },
     }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+
+  return (await response.json()) as Problem;
+}
+
+export async function getProblem(
+  problemId: string | number,
+): Promise<Problem> {
+  const response = await fetch(`${API_PREFIX}/problems/${problemId}`, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
   });
 
   if (!response.ok) {
