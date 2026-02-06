@@ -1,15 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { createProblem } from "../../../../lib/api";
+import { createProblem } from "../../../../../lib/api";
 
 type PageProps = {
-  params: {
+  params: Promise<{
     nodeId: string;
-  };
+  }>;
 };
 
 export default function NewProblemPage({ params }: PageProps) {
@@ -20,7 +20,8 @@ export default function NewProblemPage({ params }: PageProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const nodeId = params?.nodeId;
+  const resolvedParams = use(params);
+  const nodeId = resolvedParams?.nodeId;
 
   const handleSubmit = async () => {
     if (!nodeId || !title.trim()) {

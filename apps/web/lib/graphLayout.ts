@@ -6,6 +6,7 @@ export type GraphNode = {
   x: number;
   y: number;
   depth: number;
+  height: number;
 };
 
 export type GraphEdge = {
@@ -29,12 +30,17 @@ const DEFAULT_OPTIONS = {
 };
 
 type LayoutOptions = Partial<typeof DEFAULT_OPTIONS>;
+type LayoutOptionsWithHeight = LayoutOptions & {
+  getNodeHeight?: (node: BookNode) => number;
+};
 
 export const buildGraphLayout = (
   nodes: BookNode[],
-  options: LayoutOptions = {},
+  options: LayoutOptionsWithHeight = {},
 ): GraphLayout => {
   const settings = { ...DEFAULT_OPTIONS, ...options };
+  const getNodeHeight =
+    options.getNodeHeight ?? (() => settings.nodeHeight);
   const idMap = new Map<string, BookNode>();
   const childrenMap = new Map<string, BookNode[]>();
 
@@ -97,18 +103,41 @@ export const buildGraphLayout = (
 
   roots.forEach(assignX);
 
+  const depthMap = new Map<string, number>();
+  const depthMaxHeights: number[] = [];
+
+  const assignDepths = (node: BookNode, depth: number) => {
+    const nodeId = String(node.id);
+    depthMap.set(nodeId, depth);
+    const height = getNodeHeight(node);
+    depthMaxHeights[depth] = Math.max(depthMaxHeights[depth] ?? 0, height);
+    const children = childrenMap.get(nodeId) ?? [];
+    children.forEach((child) => assignDepths(child, depth + 1));
+  };
+
+  roots.forEach((root) => assignDepths(root, 0));
+
+  const depthOffsets: number[] = [];
+  let currentY = settings.padding;
+  for (let depth = 0; depth < depthMaxHeights.length; depth += 1) {
+    depthOffsets[depth] = currentY;
+    currentY += (depthMaxHeights[depth] ?? settings.nodeHeight) + settings.yGap;
+  }
+
   const positionNodes = (node: BookNode, depth: number) => {
     const nodeId = String(node.id);
     const xIndex = xMap.get(nodeId) ?? 0;
     const x =
       settings.padding + xIndex * (settings.nodeWidth + settings.xGap);
-    const y = settings.padding + depth * (settings.nodeHeight + settings.yGap);
+    const y = depthOffsets[depth] ?? settings.padding;
+    const height = getNodeHeight(node);
     const graphNode: GraphNode = {
       id: nodeId,
       node,
       x,
       y,
       depth,
+      height,
     };
     positionedNodes.push(graphNode);
 
@@ -138,10 +167,13 @@ export const buildGraphLayout = (
   });
 
   const maxX = positionedNodes.reduce((acc, node) => Math.max(acc, node.x), 0);
-  const maxY = positionedNodes.reduce((acc, node) => Math.max(acc, node.y), 0);
+  const maxY = positionedNodes.reduce(
+    (acc, node) => Math.max(acc, node.y + node.height),
+    0,
+  );
 
   const width = maxX + settings.nodeWidth + settings.padding;
-  const height = maxY + settings.nodeHeight + settings.padding;
+  const height = maxY + settings.padding;
 
   return { nodes: positionedNodes, edges, width, height };
 };
