@@ -105,3 +105,70 @@ func TestCreateProblemRejectsBadJSON(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, response.Code)
 	}
 }
+
+func TestGetProblemByID(t *testing.T) {
+	log := logger.NewJSONLogger(io.Discard)
+	bookUsecase := usecase.NewBookUsecase(&fakeBookRepo{})
+	nodeUsecase := usecase.NewNodeUsecase(&fakeNodeRepo{})
+	problemUsecase := usecase.NewProblemUsecase(&fakeProblemRepo{allowAllNodes: true})
+	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase, problemUsecase)
+
+	payload := map[string]any{
+		"kind": "qa",
+		"content": map[string]string{
+			"title":     "Fetch me",
+			"body_md":   "Q: ...",
+			"answer_md": "A: ...",
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/v1/nodes/1/problems", bytes.NewReader(body))
+	createResponse := httptest.NewRecorder()
+	handler.ServeHTTP(createResponse, createRequest)
+
+	if createResponse.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createResponse.Code)
+	}
+
+	getRequest := httptest.NewRequest(http.MethodGet, "/api/v1/problems/1", nil)
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, getRequest)
+
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, getResponse.Code)
+	}
+
+	var item struct {
+		ID     int64 `json:"id"`
+		NodeID int64 `json:"node_id"`
+	}
+	if err := json.NewDecoder(getResponse.Body).Decode(&item); err != nil {
+		t.Fatalf("decode get response: %v", err)
+	}
+	if item.ID != 1 {
+		t.Fatalf("expected id 1, got %d", item.ID)
+	}
+	if item.NodeID != 1 {
+		t.Fatalf("expected node_id 1, got %d", item.NodeID)
+	}
+}
+
+func TestGetProblemByIDNotFound(t *testing.T) {
+	log := logger.NewJSONLogger(io.Discard)
+	bookUsecase := usecase.NewBookUsecase(&fakeBookRepo{})
+	nodeUsecase := usecase.NewNodeUsecase(&fakeNodeRepo{})
+	problemUsecase := usecase.NewProblemUsecase(&fakeProblemRepo{allowAllNodes: true})
+	handler := NewRouterWithUsecases(log, bookUsecase, nodeUsecase, problemUsecase)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/problems/999", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, response.Code)
+	}
+}
