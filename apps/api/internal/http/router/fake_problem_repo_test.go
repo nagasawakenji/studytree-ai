@@ -47,6 +47,15 @@ func (f *fakeProblemRepo) ListByNode(_ context.Context, _ string, nodeID int64) 
 	return filtered, nil
 }
 
+func (f *fakeProblemRepo) GetByID(_ context.Context, _ string, problemID int64) (usecase.Problem, error) {
+	for _, problem := range f.problems {
+		if problem.ID == problemID {
+			return problem, nil
+		}
+	}
+	return usecase.Problem{}, usecase.ErrProblemNotFound
+}
+
 func (f *fakeProblemRepo) Create(_ context.Context, _ string, nodeID int64, kind string, schemaVer int, content json.RawMessage) (usecase.Problem, error) {
 	if !f.nodeAllowed(nodeID) {
 		return usecase.Problem{}, usecase.ErrNodeNotFound
