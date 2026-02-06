@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/nagasawakenji/studytree-ai/apps/api/internal/usecase"
 )
 
@@ -139,4 +141,51 @@ func (h *ProblemHandler) Create(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: problem.UpdatedAt,
 	}
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// GetByID handles GET /problems/{problem_id}.
+func (h *ProblemHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+	if h.usecase == nil {
+		writeError(w, http.StatusInternalServerError, "problem usecase not configured")
+		return
+	}
+
+	problemID, err := parseProblemID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid problem_id")
+		return
+	}
+
+	problem, err := h.usecase.GetByID(r.Context(), problemID)
+	if err != nil {
+		if errors.Is(err, usecase.ErrProblemNotFound) {
+			writeError(w, http.StatusNotFound, "problem not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to fetch problem")
+		return
+	}
+
+	resp := struct {
+		ID        int64           `json:"id"`
+		NodeID    int64           `json:"node_id"`
+		Kind      string          `json:"kind"`
+		SchemaVer int             `json:"schema_ver"`
+		Content   json.RawMessage `json:"content"`
+		CreatedAt time.Time       `json:"created_at"`
+		UpdatedAt time.Time       `json:"updated_at"`
+	}{
+		ID:        problem.ID,
+		NodeID:    problem.NodeID,
+		Kind:      problem.Kind,
+		SchemaVer: problem.SchemaVer,
+		Content:   problem.Content,
+		CreatedAt: problem.CreatedAt,
+		UpdatedAt: problem.UpdatedAt,
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func parseProblemID(r *http.Request) (int64, error) {
+	return strconv.ParseInt(chi.URLParam(r, "problem_id"), 10, 64)
 }

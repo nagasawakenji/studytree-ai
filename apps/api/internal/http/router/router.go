@@ -52,6 +52,7 @@ func NewRouterWithUsecases(log *logger.Logger, bookUsecase *usecase.BookUsecase,
 			r.Get("/", problemHandler.ListByNode)
 			r.Post("/", problemHandler.Create)
 		})
+		r.Get("/problems/{problem_id}", problemHandler.GetByID)
 	})
 
 	return r
