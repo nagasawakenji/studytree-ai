@@ -14,7 +14,6 @@ import {
 import {
   createBook,
   createNode,
-  createProblem,
   listAllNodes,
   listBooks,
   listProblems,
@@ -31,16 +30,6 @@ type Slot = "primary" | "secondary";
 type DragPayload = {
   nodeId?: string | number;
   bookId?: string | number;
-};
-
-const getNodeById = (
-  nodes: BookNode[],
-  nodeId: string | number | null,
-): BookNode | undefined => {
-  if (nodeId === null) {
-    return undefined;
-  }
-  return nodes.find((node) => String(node.id) === String(nodeId));
 };
 
 const getBookById = (
@@ -176,20 +165,21 @@ export default function Home() {
   } | null>(null);
   const [rootDragActive, setRootDragActive] = useState<Slot | null>(null);
 
-  const [activeNodeId, setActiveNodeId] = useState<string | number | null>(null);
-  const [activeSlot, setActiveSlot] = useState<Slot | null>(null);
-
-  const [problems, setProblems] = useState<Problem[]>([]);
-  const [problemsLoading, setProblemsLoading] = useState(false);
-  const [problemsError, setProblemsError] = useState<string | null>(null);
-  const [problemTitle, setProblemTitle] = useState("");
-  const [problemBody, setProblemBody] = useState("");
-  const [problemAnswer, setProblemAnswer] = useState("");
-  const [problemSaving, setProblemSaving] = useState(false);
-  const [highlightedProblemKey, setHighlightedProblemKey] = useState<
-    string | null
-  >(null);
-  const highlightTimeoutRef = useRef<number | null>(null);
+  const [problemsByNode, setProblemsByNode] = useState<
+    Record<string, Problem[]>
+  >({});
+  const [problemsLoadingByNode, setProblemsLoadingByNode] = useState<
+    Record<string, boolean>
+  >({});
+  const [problemsErrorByNode, setProblemsErrorByNode] = useState<
+    Record<string, string | null>
+  >({});
+  const [openProblemNodes, setOpenProblemNodes] = useState<
+    Record<string, boolean>
+  >({});
+  const [showAllProblems, setShowAllProblems] = useState<
+    Record<string, boolean>
+  >({});
 
   const loadBooks = useCallback(async () => {
     setBooksError(null);
@@ -227,6 +217,7 @@ export default function Home() {
   };
 
   const loadNodes = useCallback(async (bookId: string | number, slot: Slot) => {
+    clearProblemsCacheForSlot(slot);
     if (slot === "primary") {
       setPrimaryNodesError(null);
       setPrimaryNodesLoading(true);
@@ -256,55 +247,71 @@ export default function Home() {
         setSecondaryNodesLoading(false);
       }
     }
-  }, []);
+  }, [clearProblemsCacheForSlot]);
 
   useEffect(() => {
     if (primaryBookId === null) {
       setPrimaryNodes([]);
       setPrimarySelectedNodeId(null);
+      clearProblemsCacheForSlot("primary");
       return;
     }
 
     void loadNodes(primaryBookId, "primary");
-  }, [primaryBookId, loadNodes]);
+  }, [primaryBookId, loadNodes, clearProblemsCacheForSlot]);
 
   useEffect(() => {
     if (secondaryBookId === null) {
       setSecondaryNodes([]);
       setSecondarySelectedNodeId(null);
+      clearProblemsCacheForSlot("secondary");
       return;
     }
 
     void loadNodes(secondaryBookId, "secondary");
-  }, [secondaryBookId, loadNodes]);
+  }, [secondaryBookId, loadNodes, clearProblemsCacheForSlot]);
 
-  const loadProblems = useCallback(async (nodeId: string | number) => {
-    setProblemsError(null);
-    setProblemsLoading(true);
-    try {
-      const data = await listProblems(nodeId);
-      setProblems(data);
-      return data;
-    } catch (err) {
-      setProblemsError(
-        err instanceof Error ? err.message : "Failed to load problems",
-      );
-      return [];
-    } finally {
-      setProblemsLoading(false);
-    }
+  const getProblemsKey = useCallback((slot: Slot, nodeId: string | number) => {
+    return `${slot}:${nodeId}`;
   }, []);
 
-  useEffect(() => {
-    if (!activeNodeId) {
-      setProblems([]);
-      setProblemsError(null);
-      setProblemsLoading(false);
-      return;
-    }
+  const clearProblemsCacheForSlot = useCallback((slot: Slot) => {
+    const prefix = `${slot}:`;
+    const filterBySlot = <T extends Record<string, unknown>>(value: T): T => {
+      const nextEntries = Object.entries(value).filter(
+        ([key]) => !key.startsWith(prefix),
+      );
+      return Object.fromEntries(nextEntries) as T;
+    };
+    setProblemsByNode((prev) => filterBySlot(prev));
+    setProblemsLoadingByNode((prev) => filterBySlot(prev));
+    setProblemsErrorByNode((prev) => filterBySlot(prev));
+    setOpenProblemNodes((prev) => filterBySlot(prev));
+    setShowAllProblems((prev) => filterBySlot(prev));
+  }, []);
 
-    void loadProblems(activeNodeId);
-  }, [activeNodeId, loadProblems]);
+  const loadProblemsForNode = useCallback(
+    async (slot: Slot, nodeId: string | number) => {
+      const key = getProblemsKey(slot, nodeId);
+      setProblemsErrorByNode((prev) => ({ ...prev, [key]: null }));
+      setProblemsLoadingByNode((prev) => ({ ...prev, [key]: true }));
+      try {
+        const data = await listProblems(nodeId);
+        setProblemsByNode((prev) => ({ ...prev, [key]: data }));
+        return data;
+      } catch (err) {
+        setProblemsErrorByNode((prev) => ({
+          ...prev,
+          [key]:
+            err instanceof Error ? err.message : "Failed to load problems",
+        }));
+        return [];
+      } finally {
+        setProblemsLoadingByNode((prev) => ({ ...prev, [key]: false }));
+      }
+    },
+    [getProblemsKey],
+  );
 
   const refreshBookNodes = useCallback(
     async (bookId: string | number) => {
@@ -417,110 +424,33 @@ export default function Home() {
     [secondaryNodes],
   );
 
-  const openProblemsPane = useCallback(
-    (slot: Slot, nodeId: string | number) => {
-      setActiveSlot(slot);
-      setActiveNodeId(nodeId);
-      setProblems([]);
-      setProblemsError(null);
-      setProblemTitle("");
-      setProblemBody("");
-      setProblemAnswer("");
-      setHighlightedProblemKey(null);
-      if (highlightTimeoutRef.current) {
-        window.clearTimeout(highlightTimeoutRef.current);
-        highlightTimeoutRef.current = null;
-      }
-    },
-    [],
-  );
-
-  const handleProblemSubmit = useCallback(async () => {
-    if (!activeNodeId || !problemTitle.trim()) {
-      return;
-    }
-
-    const titleValue = problemTitle.trim();
-    setProblemSaving(true);
-    setProblemsError(null);
-    try {
-      const created = await createProblem(activeNodeId, {
-        title: titleValue,
-        bodyMd: problemBody.trim(),
-        answerMd: problemAnswer.trim(),
-      });
-      setProblemTitle("");
-      setProblemBody("");
-      setProblemAnswer("");
-      const nextProblems = await loadProblems(activeNodeId);
-      let focusKey: string | null = null;
-      if (created?.id !== undefined && created?.id !== null) {
-        focusKey = String(created.id);
-      } else {
-        const matchIndex = nextProblems.findIndex(
-          (problem) => problem.content?.title?.trim() === titleValue,
-        );
-        if (matchIndex >= 0) {
-          focusKey = String(nextProblems[matchIndex]?.id ?? `idx-${matchIndex}`);
-        }
-      }
-      if (focusKey) {
-        setHighlightedProblemKey(focusKey);
-        if (highlightTimeoutRef.current) {
-          window.clearTimeout(highlightTimeoutRef.current);
-        }
-        highlightTimeoutRef.current = window.setTimeout(() => {
-          setHighlightedProblemKey((current) =>
-            current === focusKey ? null : current,
-          );
-        }, 2500);
-      }
-    } catch (err) {
-      setProblemsError(
-        err instanceof Error ? err.message : "Failed to add problem",
-      );
-    } finally {
-      setProblemSaving(false);
-    }
-  }, [activeNodeId, loadProblems, problemAnswer, problemBody, problemTitle]);
-
   const primaryBook = getBookById(books, primaryBookId);
   const secondaryBook = getBookById(books, secondaryBookId);
-  const activeNodes =
-    activeSlot === "primary"
-      ? primaryNodes
-      : activeSlot === "secondary"
-        ? secondaryNodes
-        : [];
-  const activeNode = getNodeById(activeNodes, activeNodeId);
+
   const getProblemKey = useCallback((problem: Problem, index: number) => {
     if (problem.id !== undefined && problem.id !== null) {
       return String(problem.id);
     }
     return `idx-${index}`;
   }, []);
-  const getProblemPreview = useCallback((problem: Problem) => {
-    const content = (problem.content ?? {}) as Record<string, unknown>;
-    const raw =
-      (typeof content.body_md === "string" && content.body_md) ||
-      (typeof content.stem_md === "string" && content.stem_md) ||
-      (typeof content.body === "string" && content.body) ||
-      (typeof content.stem === "string" && content.stem) ||
-      "";
-    if (!raw.trim()) {
-      return "";
-    }
-    const cleaned = raw
-      .replace(/\r\n/g, "\n")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .join(" ");
-    if (cleaned.length <= 180) {
-      return cleaned;
-    }
-    return `${cleaned.slice(0, 180)}…`;
-  }, []);
+
+  const toggleProblemsForNode = useCallback(
+    (slot: Slot, nodeId: string | number) => {
+      const key = getProblemsKey(slot, nodeId);
+      setOpenProblemNodes((prev) => {
+        const nextOpen = !prev[key];
+        if (
+          nextOpen &&
+          problemsByNode[key] === undefined &&
+          !problemsLoadingByNode[key]
+        ) {
+          void loadProblemsForNode(slot, nodeId);
+        }
+        return { ...prev, [key]: nextOpen };
+      });
+    },
+    [getProblemsKey, loadProblemsForNode, problemsByNode, problemsLoadingByNode],
+  );
   const {
     viewport: primaryViewport,
     setViewport: setPrimaryViewport,
@@ -759,17 +689,16 @@ export default function Home() {
           <header className="space-y-1">
             <h2 className="text-2xl font-semibold">Dual Book Trees</h2>
             <p className="text-sm text-zinc-500">
-              Drag a node across books to reparent. Click a node to load its
-              problems in the side panel.
+              Drag a node across books to reparent. Use the Problems toggle on
+              each node to view its inline list.
             </p>
           </header>
 
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-            <div
-              className={`grid gap-6 ${
-                secondaryBookId ? "lg:grid-cols-2" : "lg:grid-cols-1"
-              }`}
-            >
+          <div
+            className={`grid gap-6 ${
+              secondaryBookId ? "lg:grid-cols-2" : "lg:grid-cols-1"
+            }`}
+          >
             <section className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -942,104 +871,243 @@ export default function Home() {
                         const isDropTarget =
                           dragOverNode?.slot === "primary" &&
                           String(dragOverNode.nodeId) === graphNode.id;
+                        const nodeId = graphNode.node.id;
+                        const canManageProblems =
+                          nodeId !== undefined && nodeId !== null;
+                        const problemsKey = canManageProblems
+                          ? getProblemsKey("primary", nodeId)
+                          : null;
+                        const isOpen = problemsKey
+                          ? openProblemNodes[problemsKey] ?? false
+                          : false;
+                        const problemsForNode = problemsKey
+                          ? problemsByNode[problemsKey] ?? []
+                          : [];
+                        const isLoading = problemsKey
+                          ? problemsLoadingByNode[problemsKey] ?? false
+                          : false;
+                        const error = problemsKey
+                          ? problemsErrorByNode[problemsKey] ?? null
+                          : null;
+                        const showAll = problemsKey
+                          ? showAllProblems[problemsKey] ?? false
+                          : false;
+                        const visibleProblems = showAll
+                          ? problemsForNode
+                          : problemsForNode.slice(0, 10);
                         return (
-                          <button
-                            key={graphNode.id}
-                            data-node-card="true"
-                            className={`absolute rounded-xl border px-4 py-3 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-neutral-400 ${
-                              isSelected
-                                ? "border-neutral-900 bg-neutral-900 text-white"
-                                : "border-neutral-200 bg-white text-zinc-900 hover:bg-neutral-50"
-                            } ${
-                              isDragging
-                                ? "scale-[1.02] shadow-lg"
-                                : "hover:shadow-md"
-                            } ${
-                              isDropTarget && !isSelected
-                                ? "ring-2 ring-indigo-300 bg-indigo-50"
-                                : ""
-                            }`}
-                            style={{
-                              left: graphNode.x,
-                              top: graphNode.y,
-                              width: GRAPH_NODE_WIDTH,
-                              height: GRAPH_NODE_HEIGHT,
-                            }}
-                            type="button"
-                            draggable={Boolean(graphNode.node.id && primaryBookId)}
-                            onDragStart={(event) => {
-                              if (!graphNode.node.id || !primaryBookId) {
-                                return;
-                              }
-                              setDraggingNode({
-                                slot: "primary",
-                                nodeId: graphNode.node.id,
-                              });
-                              event.dataTransfer.setData(
-                                "application/json",
-                                JSON.stringify({
+                          <div key={graphNode.id}>
+                            <button
+                              data-node-card="true"
+                              className={`absolute rounded-xl border px-4 py-3 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-neutral-400 ${
+                                isSelected
+                                  ? "border-neutral-900 bg-neutral-900 text-white"
+                                  : "border-neutral-200 bg-white text-zinc-900 hover:bg-neutral-50"
+                              } ${
+                                isDragging
+                                  ? "scale-[1.02] shadow-lg"
+                                  : "hover:shadow-md"
+                              } ${
+                                isDropTarget && !isSelected
+                                  ? "ring-2 ring-indigo-300 bg-indigo-50"
+                                  : ""
+                              }`}
+                              style={{
+                                left: graphNode.x,
+                                top: graphNode.y,
+                                width: GRAPH_NODE_WIDTH,
+                                height: GRAPH_NODE_HEIGHT,
+                              }}
+                              type="button"
+                              draggable={Boolean(
+                                graphNode.node.id && primaryBookId,
+                              )}
+                              onDragStart={(event) => {
+                                if (!graphNode.node.id || !primaryBookId) {
+                                  return;
+                                }
+                                setDraggingNode({
+                                  slot: "primary",
                                   nodeId: graphNode.node.id,
-                                  bookId: primaryBookId,
-                                }),
-                              );
-                              event.dataTransfer.effectAllowed = "move";
-                            }}
-                            onDragEnd={() => {
-                              setDraggingNode(null);
-                              setDragOverNode(null);
-                              setRootDragActive(null);
-                            }}
-                            onClick={() => {
-                              if (
-                                graphNode.node.id !== undefined &&
-                                graphNode.node.id !== null
-                              ) {
-                                setPrimarySelectedNodeId(graphNode.node.id);
-                                openProblemsPane(
-                                  "primary",
-                                  graphNode.node.id,
+                                });
+                                event.dataTransfer.setData(
+                                  "application/json",
+                                  JSON.stringify({
+                                    nodeId: graphNode.node.id,
+                                    bookId: primaryBookId,
+                                  }),
                                 );
-                              }
-                            }}
-                            onDragOver={(event) => {
-                              event.preventDefault();
-                              setRootDragActive(null);
-                              if (
-                                graphNode.node.id === null ||
-                                graphNode.node.id === undefined
-                              ) {
-                                return;
-                              }
-                              setDragOverNode({
-                                slot: "primary",
-                                nodeId: graphNode.node.id,
-                              });
-                            }}
-                            onDragLeave={() => {
-                              setDragOverNode((prev) =>
-                                prev?.slot === "primary" &&
-                                String(prev.nodeId) === graphNode.id
-                                  ? null
-                                  : prev,
-                              );
-                            }}
-                            onDrop={(event) => {
-                              setDragOverNode(null);
-                              handleDropNode(
-                                event,
-                                primaryBookId,
-                                graphNode.node.id ?? null,
-                                setPrimaryNodesError,
-                              );
-                            }}
-                          >
-                            <div className="text-sm font-semibold">
-                              {graphNode.node.title}
-                            </div>
-                            <div className="text-[11px] text-neutral-400">
-                              id: {graphNode.node.id ?? "-"}
-                            </div>
-                          </button>
+                                event.dataTransfer.effectAllowed = "move";
+                              }}
+                              onDragEnd={() => {
+                                setDraggingNode(null);
+                                setDragOverNode(null);
+                                setRootDragActive(null);
+                              }}
+                              onClick={() => {
+                                if (
+                                  graphNode.node.id !== undefined &&
+                                  graphNode.node.id !== null
+                                ) {
+                                  setPrimarySelectedNodeId(graphNode.node.id);
+                                }
+                              }}
+                              onDragOver={(event) => {
+                                event.preventDefault();
+                                setRootDragActive(null);
+                                if (
+                                  graphNode.node.id === null ||
+                                  graphNode.node.id === undefined
+                                ) {
+                                  return;
+                                }
+                                setDragOverNode({
+                                  slot: "primary",
+                                  nodeId: graphNode.node.id,
+                                });
+                              }}
+                              onDragLeave={() => {
+                                setDragOverNode((prev) =>
+                                  prev?.slot === "primary" &&
+                                  String(prev.nodeId) === graphNode.id
+                                    ? null
+                                    : prev,
+                                );
+                              }}
+                              onDrop={(event) => {
+                                setDragOverNode(null);
+                                handleDropNode(
+                                  event,
+                                  primaryBookId,
+                                  graphNode.node.id ?? null,
+                                  setPrimaryNodesError,
+                                );
+                              }}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <div className="text-sm font-semibold">
+                                    {graphNode.node.title}
+                                  </div>
+                                  <div className="text-[11px] text-neutral-400">
+                                    id: {graphNode.node.id ?? "-"}
+                                  </div>
+                                </div>
+                                <button
+                                  className="rounded-full border border-neutral-200 bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-neutral-600 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    event.preventDefault();
+                                    if (canManageProblems) {
+                                      toggleProblemsForNode(
+                                        "primary",
+                                        nodeId as string | number,
+                                      );
+                                    }
+                                  }}
+                                  disabled={!canManageProblems}
+                                >
+                                  {isOpen ? "▾ Problems" : "▸ Problems"}
+                                </button>
+                              </div>
+                            </button>
+                            {isOpen && problemsKey ? (
+                              <div
+                                className="absolute z-10 rounded-xl border border-neutral-200 bg-white p-3 text-xs shadow-lg"
+                                style={{
+                                  left: graphNode.x,
+                                  top: graphNode.y + GRAPH_NODE_HEIGHT + 8,
+                                  width: GRAPH_NODE_WIDTH,
+                                }}
+                                onMouseDown={(event) => event.stopPropagation()}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold text-zinc-700">
+                                    Problems
+                                  </span>
+                                  {nodeId ? (
+                                    <Link
+                                      className="text-[11px] font-semibold text-neutral-700 underline"
+                                      href={`/nodes/${nodeId}/problems/new`}
+                                    >
+                                      + Add problem
+                                    </Link>
+                                  ) : null}
+                                </div>
+                                {isLoading ? (
+                                  <p className="mt-2 text-zinc-500">
+                                    Loading...
+                                  </p>
+                                ) : error ? (
+                                  <p className="mt-2 text-red-600">
+                                    Failed to load problems
+                                  </p>
+                                ) : problemsForNode.length === 0 ? (
+                                  <p className="mt-2 text-zinc-500">
+                                    No problems yet.
+                                  </p>
+                                ) : (
+                                  <ul className="mt-2 space-y-1">
+                                    {visibleProblems.map((problem, index) => {
+                                      const problemKey = getProblemKey(
+                                        problem,
+                                        index,
+                                      );
+                                      const problemHref =
+                                        problem.id !== undefined &&
+                                        problem.id !== null
+                                          ? `/problems/${problem.id}`
+                                          : null;
+                                      return (
+                                        <li
+                                          key={problemKey}
+                                          className="flex items-center justify-between gap-2 rounded-lg border border-zinc-100 bg-zinc-50 px-2 py-1"
+                                        >
+                                          <div className="min-w-0">
+                                            <p className="truncate text-[11px] font-semibold text-zinc-800">
+                                              {problem.content?.title ??
+                                                "Untitled problem"}
+                                            </p>
+                                            <p className="text-[10px] text-zinc-500">
+                                              id: {problem.id ?? "-"}
+                                            </p>
+                                          </div>
+                                          {problemHref ? (
+                                            <Link
+                                              className="rounded border border-zinc-200 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 hover:bg-white"
+                                              href={problemHref}
+                                            >
+                                              Open
+                                            </Link>
+                                          ) : (
+                                            <span className="text-[10px] text-zinc-400">
+                                              No ID
+                                            </span>
+                                          )}
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                )}
+                                {problemsForNode.length > 10 ? (
+                                  <button
+                                    className="mt-2 text-[11px] font-semibold text-neutral-600 underline"
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setShowAllProblems((prev) => ({
+                                        ...prev,
+                                        [problemsKey]: !showAll,
+                                      }));
+                                    }}
+                                  >
+                                    {showAll ? "Show less" : "Show all"}
+                                  </button>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
                         );
                       })}
                       {inlineChapter?.slot === "primary" ? (
@@ -1261,108 +1329,247 @@ export default function Home() {
                           const isDropTarget =
                             dragOverNode?.slot === "secondary" &&
                             String(dragOverNode.nodeId) === graphNode.id;
+                          const nodeId = graphNode.node.id;
+                          const canManageProblems =
+                            nodeId !== undefined && nodeId !== null;
+                          const problemsKey = canManageProblems
+                            ? getProblemsKey("secondary", nodeId)
+                            : null;
+                          const isOpen = problemsKey
+                            ? openProblemNodes[problemsKey] ?? false
+                            : false;
+                          const problemsForNode = problemsKey
+                            ? problemsByNode[problemsKey] ?? []
+                            : [];
+                          const isLoading = problemsKey
+                            ? problemsLoadingByNode[problemsKey] ?? false
+                            : false;
+                          const error = problemsKey
+                            ? problemsErrorByNode[problemsKey] ?? null
+                            : null;
+                          const showAll = problemsKey
+                            ? showAllProblems[problemsKey] ?? false
+                            : false;
+                          const visibleProblems = showAll
+                            ? problemsForNode
+                            : problemsForNode.slice(0, 10);
                           return (
-                            <button
-                              key={graphNode.id}
-                              data-node-card="true"
-                              className={`absolute rounded-xl border px-4 py-3 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-neutral-400 ${
-                                isSelected
-                                  ? "border-neutral-900 bg-neutral-900 text-white"
-                                  : "border-neutral-200 bg-white text-zinc-900 hover:bg-neutral-50"
-                              } ${
-                                isDragging
-                                  ? "scale-[1.02] shadow-lg"
-                                  : "hover:shadow-md"
-                              } ${
-                                isDropTarget && !isSelected
-                                  ? "ring-2 ring-indigo-300 bg-indigo-50"
-                                  : ""
-                              }`}
-                              style={{
-                                left: graphNode.x,
-                                top: graphNode.y,
-                                width: GRAPH_NODE_WIDTH,
-                                height: GRAPH_NODE_HEIGHT,
-                              }}
-                              type="button"
-                              draggable={Boolean(
-                                graphNode.node.id && secondaryBookId,
-                              )}
-                              onDragStart={(event) => {
-                                if (!graphNode.node.id || !secondaryBookId) {
-                                  return;
-                                }
-                                setDraggingNode({
-                                  slot: "secondary",
-                                  nodeId: graphNode.node.id,
-                                });
-                                event.dataTransfer.setData(
-                                  "application/json",
-                                  JSON.stringify({
+                            <div key={graphNode.id}>
+                              <button
+                                data-node-card="true"
+                                className={`absolute rounded-xl border px-4 py-3 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-neutral-400 ${
+                                  isSelected
+                                    ? "border-neutral-900 bg-neutral-900 text-white"
+                                    : "border-neutral-200 bg-white text-zinc-900 hover:bg-neutral-50"
+                                } ${
+                                  isDragging
+                                    ? "scale-[1.02] shadow-lg"
+                                    : "hover:shadow-md"
+                                } ${
+                                  isDropTarget && !isSelected
+                                    ? "ring-2 ring-indigo-300 bg-indigo-50"
+                                    : ""
+                                }`}
+                                style={{
+                                  left: graphNode.x,
+                                  top: graphNode.y,
+                                  width: GRAPH_NODE_WIDTH,
+                                  height: GRAPH_NODE_HEIGHT,
+                                }}
+                                type="button"
+                                draggable={Boolean(
+                                  graphNode.node.id && secondaryBookId,
+                                )}
+                                onDragStart={(event) => {
+                                  if (!graphNode.node.id || !secondaryBookId) {
+                                    return;
+                                  }
+                                  setDraggingNode({
+                                    slot: "secondary",
                                     nodeId: graphNode.node.id,
-                                    bookId: secondaryBookId,
-                                  }),
-                                );
-                                event.dataTransfer.effectAllowed = "move";
-                              }}
-                              onDragEnd={() => {
-                                setDraggingNode(null);
-                                setDragOverNode(null);
-                                setRootDragActive(null);
-                              }}
-                              onClick={() => {
-                                if (
-                                  graphNode.node.id !== undefined &&
-                                  graphNode.node.id !== null
-                                ) {
-                                  setSecondarySelectedNodeId(
-                                    graphNode.node.id,
+                                  });
+                                  event.dataTransfer.setData(
+                                    "application/json",
+                                    JSON.stringify({
+                                      nodeId: graphNode.node.id,
+                                      bookId: secondaryBookId,
+                                    }),
                                   );
-                                  openProblemsPane(
-                                    "secondary",
-                                    graphNode.node.id,
+                                  event.dataTransfer.effectAllowed = "move";
+                                }}
+                                onDragEnd={() => {
+                                  setDraggingNode(null);
+                                  setDragOverNode(null);
+                                  setRootDragActive(null);
+                                }}
+                                onClick={() => {
+                                  if (
+                                    graphNode.node.id !== undefined &&
+                                    graphNode.node.id !== null
+                                  ) {
+                                    setSecondarySelectedNodeId(
+                                      graphNode.node.id,
+                                    );
+                                  }
+                                }}
+                                onDragOver={(event) => {
+                                  event.preventDefault();
+                                  setRootDragActive(null);
+                                  if (
+                                    graphNode.node.id === null ||
+                                    graphNode.node.id === undefined
+                                  ) {
+                                    return;
+                                  }
+                                  setDragOverNode({
+                                    slot: "secondary",
+                                    nodeId: graphNode.node.id,
+                                  });
+                                }}
+                                onDragLeave={() => {
+                                  setDragOverNode((prev) =>
+                                    prev?.slot === "secondary" &&
+                                    String(prev.nodeId) === graphNode.id
+                                      ? null
+                                      : prev,
                                   );
-                                }
-                              }}
-                              onDragOver={(event) => {
-                                event.preventDefault();
-                                setRootDragActive(null);
-                                if (
-                                  graphNode.node.id === null ||
-                                  graphNode.node.id === undefined
-                                ) {
-                                  return;
-                                }
-                                setDragOverNode({
-                                  slot: "secondary",
-                                  nodeId: graphNode.node.id,
-                                });
-                              }}
-                              onDragLeave={() => {
-                                setDragOverNode((prev) =>
-                                  prev?.slot === "secondary" &&
-                                  String(prev.nodeId) === graphNode.id
-                                    ? null
-                                    : prev,
-                                );
-                              }}
-                              onDrop={(event) => {
-                                setDragOverNode(null);
-                                handleDropNode(
-                                  event,
-                                  secondaryBookId,
-                                  graphNode.node.id ?? null,
-                                  setSecondaryNodesError,
-                                );
-                              }}
-                            >
-                              <div className="text-sm font-semibold">
-                                {graphNode.node.title}
-                              </div>
-                              <div className="text-[11px] text-neutral-400">
-                                id: {graphNode.node.id ?? "-"}
-                              </div>
-                            </button>
+                                }}
+                                onDrop={(event) => {
+                                  setDragOverNode(null);
+                                  handleDropNode(
+                                    event,
+                                    secondaryBookId,
+                                    graphNode.node.id ?? null,
+                                    setSecondaryNodesError,
+                                  );
+                                }}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <div className="text-sm font-semibold">
+                                      {graphNode.node.title}
+                                    </div>
+                                    <div className="text-[11px] text-neutral-400">
+                                      id: {graphNode.node.id ?? "-"}
+                                    </div>
+                                  </div>
+                                  <button
+                                    className="rounded-full border border-neutral-200 bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-neutral-600 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      event.preventDefault();
+                                      if (canManageProblems) {
+                                        toggleProblemsForNode(
+                                          "secondary",
+                                          nodeId as string | number,
+                                        );
+                                      }
+                                    }}
+                                    disabled={!canManageProblems}
+                                  >
+                                    {isOpen ? "▾ Problems" : "▸ Problems"}
+                                  </button>
+                                </div>
+                              </button>
+                              {isOpen && problemsKey ? (
+                                <div
+                                  className="absolute z-10 rounded-xl border border-neutral-200 bg-white p-3 text-xs shadow-lg"
+                                  style={{
+                                    left: graphNode.x,
+                                    top: graphNode.y + GRAPH_NODE_HEIGHT + 8,
+                                    width: GRAPH_NODE_WIDTH,
+                                  }}
+                                  onMouseDown={(event) => event.stopPropagation()}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="font-semibold text-zinc-700">
+                                      Problems
+                                    </span>
+                                    {nodeId ? (
+                                      <Link
+                                        className="text-[11px] font-semibold text-neutral-700 underline"
+                                        href={`/nodes/${nodeId}/problems/new`}
+                                      >
+                                        + Add problem
+                                      </Link>
+                                    ) : null}
+                                  </div>
+                                  {isLoading ? (
+                                    <p className="mt-2 text-zinc-500">
+                                      Loading...
+                                    </p>
+                                  ) : error ? (
+                                    <p className="mt-2 text-red-600">
+                                      Failed to load problems
+                                    </p>
+                                  ) : problemsForNode.length === 0 ? (
+                                    <p className="mt-2 text-zinc-500">
+                                      No problems yet.
+                                    </p>
+                                  ) : (
+                                    <ul className="mt-2 space-y-1">
+                                      {visibleProblems.map(
+                                        (problem, index) => {
+                                          const problemKey = getProblemKey(
+                                            problem,
+                                            index,
+                                          );
+                                          const problemHref =
+                                            problem.id !== undefined &&
+                                            problem.id !== null
+                                              ? `/problems/${problem.id}`
+                                              : null;
+                                          return (
+                                            <li
+                                              key={problemKey}
+                                              className="flex items-center justify-between gap-2 rounded-lg border border-zinc-100 bg-zinc-50 px-2 py-1"
+                                            >
+                                              <div className="min-w-0">
+                                                <p className="truncate text-[11px] font-semibold text-zinc-800">
+                                                  {problem.content?.title ??
+                                                    "Untitled problem"}
+                                                </p>
+                                                <p className="text-[10px] text-zinc-500">
+                                                  id: {problem.id ?? "-"}
+                                                </p>
+                                              </div>
+                                              {problemHref ? (
+                                                <Link
+                                                  className="rounded border border-zinc-200 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 hover:bg-white"
+                                                  href={problemHref}
+                                                >
+                                                  Open
+                                                </Link>
+                                              ) : (
+                                                <span className="text-[10px] text-zinc-400">
+                                                  No ID
+                                                </span>
+                                              )}
+                                            </li>
+                                          );
+                                        },
+                                      )}
+                                    </ul>
+                                  )}
+                                  {problemsForNode.length > 10 ? (
+                                    <button
+                                      className="mt-2 text-[11px] font-semibold text-neutral-600 underline"
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setShowAllProblems((prev) => ({
+                                          ...prev,
+                                          [problemsKey]: !showAll,
+                                        }));
+                                      }}
+                                    >
+                                      {showAll ? "Show less" : "Show all"}
+                                    </button>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
                           );
                         })}
                         {inlineChapter?.slot === "secondary" ? (
@@ -1410,150 +1617,6 @@ export default function Home() {
                 ) : null}
               </section>
             ) : null}
-            </div>
-
-            <section className="flex min-h-[420px] flex-col rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-semibold">Problems</h3>
-                  <p className="text-xs text-zinc-500">
-                    {activeNode
-                      ? `${activeNode.title} · id: ${activeNodeId ?? "-"}`
-                      : "Select a chapter node to view its problems."}
-                  </p>
-                </div>
-                {activeNodeId ? (
-                  <button
-                    className="text-xs text-zinc-500 underline"
-                    type="button"
-                    onClick={() => {
-                      setActiveNodeId(null);
-                      setActiveSlot(null);
-                    }}
-                  >
-                    Clear
-                  </button>
-                ) : null}
-              </div>
-
-              <div className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
-                <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-                  <h4 className="text-xs font-semibold text-zinc-600">
-                    Existing problems
-                  </h4>
-                  {!activeNodeId ? (
-                    <p className="mt-2 text-xs text-zinc-500">
-                      Choose a node on the left to see the problem list.
-                    </p>
-                  ) : problemsLoading ? (
-                    <p className="mt-2 text-xs text-zinc-500">
-                      Loading problems...
-                    </p>
-                  ) : problems.length === 0 ? (
-                    <p className="mt-2 text-xs text-zinc-500">
-                      No problems yet.
-                    </p>
-                  ) : (
-                    <ul className="mt-2 space-y-2">
-                      {problems.map((problem, index) => {
-                        const problemKey = getProblemKey(problem, index);
-                        const isHighlighted =
-                          highlightedProblemKey === problemKey;
-                        const preview = getProblemPreview(problem);
-                        const problemHref =
-                          problem.id !== undefined && problem.id !== null
-                            ? `/problems/${problem.id}`
-                            : null;
-                        return (
-                          <li
-                            key={problemKey}
-                            className={`rounded-lg border px-3 py-2 transition ${
-                              isHighlighted
-                                ? "border-amber-200 bg-amber-50 shadow-sm"
-                                : "border-zinc-200 bg-white hover:bg-zinc-50"
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="text-sm font-semibold text-zinc-900">
-                                  {problem.content?.title ?? "Untitled problem"}
-                                </p>
-                                <p className="text-xs text-zinc-500">
-                                  id: {problem.id ?? "-"} ·{" "}
-                                  {problem.kind ?? "qa"}
-                                </p>
-                              </div>
-                              {problemHref ? (
-                                <Link
-                                  className="rounded-md border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
-                                  href={problemHref}
-                                >
-                                  Open
-                                </Link>
-                              ) : (
-                                <span className="text-xs text-zinc-400">
-                                  No ID
-                                </span>
-                              )}
-                            </div>
-                            {preview ? (
-                              <p className="mt-2 text-xs text-zinc-600">
-                                {preview}
-                              </p>
-                            ) : (
-                              <p className="mt-2 text-xs text-zinc-400">
-                                No preview available.
-                              </p>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                  {problemsError ? (
-                    <p className="mt-2 text-xs text-red-600">
-                      {problemsError}
-                    </p>
-                  ) : null}
-                </div>
-
-                <div className="space-y-2 border-t border-zinc-100 pt-4">
-                  <h4 className="text-xs font-semibold text-zinc-600">
-                    New problem
-                  </h4>
-                  <input
-                    className="w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
-                    placeholder="Problem title"
-                    value={problemTitle}
-                    onChange={(event) => setProblemTitle(event.target.value)}
-                  />
-                  <textarea
-                    className="min-h-[120px] w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
-                    placeholder="Problem body (Markdown)"
-                    value={problemBody}
-                    onChange={(event) => setProblemBody(event.target.value)}
-                  />
-                  <textarea
-                    className="min-h-[80px] w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
-                    placeholder="Answer (Markdown)"
-                    value={problemAnswer}
-                    onChange={(event) => setProblemAnswer(event.target.value)}
-                  />
-                  <button
-                    className="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
-                    type="button"
-                    onClick={() => void handleProblemSubmit()}
-                    disabled={
-                      problemSaving ||
-                      !problemTitle.trim() ||
-                      !activeNodeId
-                    }
-                  >
-                    {problemSaving ? "Saving..." : "Add problem"}
-                  </button>
-                </div>
-              </div>
-            </section>
           </div>
         </div>
       </main>
