@@ -2,16 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 
 import { getProblem, type Problem } from "../../../lib/api";
 import { MarkdownContent } from "../../../lib/markdown";
-
-type PageProps = {
-  params: {
-    problemId: string;
-  };
-};
 
 type ContentShape = Record<string, unknown>;
 
@@ -23,15 +17,17 @@ const pickString = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
-export default function ProblemDetailPage({ params }: PageProps) {
+export default function ProblemDetailPage() {
   const router = useRouter();
+  const params = useParams<{ problemId: string }>();
+  const problemId = params?.problemId;
   const [problem, setProblem] = useState<Problem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showAnswer, setShowAnswer] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    const problemId = params?.problemId;
     if (!problemId) {
       setError("Problem id is missing.");
       setLoading(false);
@@ -61,7 +57,7 @@ export default function ProblemDetailPage({ params }: PageProps) {
     return () => {
       cancelled = true;
     };
-  }, [params?.problemId]);
+  }, [problemId]);
 
   const content = useMemo(() => {
     return (problem?.content ?? {}) as ContentShape;
@@ -89,6 +85,12 @@ export default function ProblemDetailPage({ params }: PageProps) {
     pickString(content.explanation) ||
     "";
 
+  const errorStatus = error?.match(/\b(4\d{2}|5\d{2})\b/)?.[1];
+  const errorLabel =
+    errorStatus === "404"
+      ? "Problem not found (404)"
+      : "Something went wrong (500)";
+
   return (
     <div className="min-h-screen bg-neutral-50 text-zinc-900">
       <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-10">
@@ -101,7 +103,7 @@ export default function ProblemDetailPage({ params }: PageProps) {
             Back
           </button>
           <Link className="text-sm text-zinc-500 underline" href="/">
-            Back to nodes
+            Home
           </Link>
         </div>
 
@@ -111,15 +113,16 @@ export default function ProblemDetailPage({ params }: PageProps) {
           </div>
         ) : error ? (
           <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700 shadow-sm">
-            <p className="text-sm">{error}</p>
+            <p className="text-sm font-semibold">{errorLabel}</p>
+            <p className="mt-2 text-xs text-red-600">{error}</p>
           </div>
         ) : problem ? (
           <div className="space-y-6 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
             <div>
               <h1 className="text-2xl font-semibold text-zinc-900">{title}</h1>
               <div className="mt-2 flex flex-wrap gap-3 text-xs text-zinc-500">
-                <span>id: {problem.id ?? "-"}</span>
-                <span>node: {problem.node_id ?? "-"}</span>
+                <span>problem_id: {problem.id ?? "-"}</span>
+                <span>node_id: {problem.node_id ?? "-"}</span>
                 <span>kind: {problem.kind ?? "qa"}</span>
                 {problem.updated_at ? (
                   <span>updated: {problem.updated_at}</span>
@@ -131,7 +134,10 @@ export default function ProblemDetailPage({ params }: PageProps) {
               <h2 className="text-sm font-semibold text-zinc-700">Problem</h2>
               {body ? (
                 <div className="mt-3 rounded-xl border border-zinc-100 bg-zinc-50 p-4">
-                  <MarkdownContent content={body} />
+                  <MarkdownContent
+                    className="text-base leading-7"
+                    content={body}
+                  />
                 </div>
               ) : (
                 <p className="mt-2 text-sm text-zinc-400">
@@ -141,11 +147,32 @@ export default function ProblemDetailPage({ params }: PageProps) {
             </div>
 
             <div>
-              <h2 className="text-sm font-semibold text-zinc-700">Answer</h2>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold text-zinc-700">Answer</h2>
+                {answer ? (
+                  <button
+                    className="rounded-full border border-emerald-200 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+                    type="button"
+                    onClick={() => setShowAnswer((prev) => !prev)}
+                  >
+                    {showAnswer ? "Hide answer" : "Show answer"}
+                  </button>
+                ) : null}
+              </div>
               {answer ? (
-                <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
-                  <MarkdownContent content={answer} tone="answer" />
-                </div>
+                showAnswer ? (
+                  <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
+                    <MarkdownContent
+                      className="text-base leading-7"
+                      content={answer}
+                      tone="answer"
+                    />
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm text-zinc-400">
+                    Answer is hidden.
+                  </p>
+                )
               ) : (
                 <p className="mt-2 text-sm text-zinc-400">
                   No answer provided.
@@ -159,7 +186,10 @@ export default function ProblemDetailPage({ params }: PageProps) {
                   Explanation
                 </h2>
                 <div className="mt-3 rounded-xl border border-zinc-100 bg-zinc-50 p-4">
-                  <MarkdownContent content={explanation} />
+                  <MarkdownContent
+                    className="text-base leading-7"
+                    content={explanation}
+                  />
                 </div>
               </div>
             ) : null}
