@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { BooksSidebar } from "./_components/BooksSidebar";
 import { TreeCanvas } from "./_components/TreeCanvas";
@@ -24,6 +25,8 @@ const getBookTitle = (
 };
 
 export default function Home() {
+  const searchParams = useSearchParams();
+  const initialPrimaryBookId = searchParams.get("book_id");
   const [chapterPopover, setChapterPopover] =
     useState<ChapterPopoverState | null>(null);
   const [inlineChapter, setInlineChapter] =
@@ -44,7 +47,10 @@ export default function Home() {
     toggleShowAll,
     clearProblemsCacheForSlot,
   } = nodeProblems;
-  const bookNodes = useBookNodes({ onClearSlot: clearProblemsCacheForSlot });
+  const bookNodes = useBookNodes({
+    onClearSlot: clearProblemsCacheForSlot,
+    initialPrimaryBookId,
+  });
   const {
     primaryBookId,
     secondaryBookId,

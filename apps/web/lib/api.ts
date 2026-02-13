@@ -31,6 +31,25 @@ export type Problem = {
   updated_at?: string;
 };
 
+export type CreateImportRequest = {
+  book_title: string;
+  source_text: string;
+  options?: {
+    max_depth?: number;
+    problems_per_leaf?: number;
+    language?: string;
+  };
+};
+
+export type CreateImportResponse = {
+  book_id: number;
+  created: {
+    nodes: number;
+    problems: number;
+    summaries: number;
+  };
+};
+
 const API_PREFIX = "/api/v1";
 
 function toInt64(value: string | number, fieldName: string): number {
@@ -318,4 +337,24 @@ export async function moveSubtree(params: {
   }
 
   return (await response.json()) as BookNode;
+}
+
+export async function createImport(
+  payload: CreateImportRequest,
+): Promise<CreateImportResponse> {
+  const response = await fetch(`${API_PREFIX}/imports/chatgpt`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Request failed: ${response.status} ${text}`);
+  }
+
+  return (await response.json()) as CreateImportResponse;
 }
