@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -14,14 +14,12 @@ type PageProps = {
 
 export default function NewProblemPage({ params }: PageProps) {
   const router = useRouter();
+  const { nodeId } = React.use(params);
   const [title, setTitle] = useState("");
   const [bodyMd, setBodyMd] = useState("");
   const [answerMd, setAnswerMd] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const resolvedParams = use(params);
-  const nodeId = resolvedParams?.nodeId;
   const statusCode = error?.match(/\b(4\d{2}|5\d{2})\b/)?.[1];
 
   const createErrorMessage =
