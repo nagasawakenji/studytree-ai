@@ -4,7 +4,7 @@ import { use, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { createProblem } from "../../../../../lib/api";
+import { createProblem } from "@/lib/api";
 
 type PageProps = {
   params: Promise<{
@@ -22,6 +22,16 @@ export default function NewProblemPage({ params }: PageProps) {
 
   const resolvedParams = use(params);
   const nodeId = resolvedParams?.nodeId;
+  const statusCode = error?.match(/\b(4\d{2}|5\d{2})\b/)?.[1];
+
+  const createErrorMessage =
+    statusCode === "400"
+      ? "Request is invalid (400). Please review the problem fields."
+      : statusCode === "404"
+        ? "Node not found (404). Refresh and try from the tree."
+        : statusCode === "500"
+          ? "Server error (500). Please try again in a moment."
+          : error;
 
   const handleSubmit = async () => {
     if (!nodeId || !title.trim()) {
@@ -33,8 +43,8 @@ export default function NewProblemPage({ params }: PageProps) {
     try {
       const created = await createProblem(nodeId, {
         title: title.trim(),
-        bodyMd: bodyMd.trim(),
-        answerMd: answerMd.trim(),
+        body_md: bodyMd.trim(),
+        answer_md: answerMd.trim(),
       });
       if (created?.id !== undefined && created?.id !== null) {
         router.push(`/problems/${created.id}`);
@@ -42,7 +52,7 @@ export default function NewProblemPage({ params }: PageProps) {
       }
       setError("Problem created, but the response was missing an id.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create problem");
+      setError(err instanceof Error ? err.message : "Failed to create problem.");
     } finally {
       setSaving(false);
     }
@@ -113,7 +123,7 @@ export default function NewProblemPage({ params }: PageProps) {
 
             {error ? (
               <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
+                {createErrorMessage}
               </p>
             ) : null}
 

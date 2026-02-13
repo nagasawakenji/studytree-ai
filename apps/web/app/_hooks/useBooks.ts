@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { createBook, listBooks, type Book } from "../../lib/api";
+import { createBook, listBooks, type Book } from "@/lib/api";
 
 export const useBooks = () => {
   const [books, setBooks] = useState<Book[]>([]);

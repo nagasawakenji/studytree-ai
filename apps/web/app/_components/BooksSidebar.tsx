@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { Book } from "../../lib/api";
+import type { Book } from "@/lib/api";
 
 type BooksSidebarProps = {
   books: Book[];

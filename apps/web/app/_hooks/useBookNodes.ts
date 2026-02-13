@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { createNode, listAllNodes, type BookNode } from "../../lib/api";
-import type { Slot } from "../_types";
+import { createNode, listAllNodes, type BookNode } from "@/lib/api";
+import type { Slot } from "@/app/_types";
 
 export const useBookNodes = (params?: {
   onClearSlot?: (slot: Slot) => void;

@@ -10,11 +10,11 @@ import {
 } from "react";
 import Link from "next/link";
 
-import type { BookNode, Problem } from "../../lib/api";
-import type { GraphLayout } from "../../lib/graphLayout";
-import { buildGraphLayout } from "../../lib/graphLayout";
-import type { ChapterPopoverState, InlineChapterState, Slot } from "../_types";
-import { usePanZoom } from "../_hooks/usePanZoom";
+import type { BookNode, Problem } from "@/lib/api";
+import type { GraphLayout } from "@/lib/graphLayout";
+import { buildGraphLayout } from "@/lib/graphLayout";
+import type { ChapterPopoverState, InlineChapterState, Slot } from "@/app/_types";
+import { usePanZoom } from "@/app/_hooks/usePanZoom";
 
 type TreeCanvasProps = {
   slot: Slot;
@@ -154,7 +154,7 @@ export const TreeCanvas = ({
       setChapterPopover(null);
       setInlineChapter(null);
     }
-  }, [chapterTitle, onCreateChapter, slot]);
+  }, [chapterTitle, onCreateChapter, setChapterPopover, setInlineChapter, slot]);
 
   const handleInlineCreate = useCallback(async () => {
     if (!inlineChapter || inlineChapter.slot !== slot) {
@@ -164,7 +164,7 @@ export const TreeCanvas = ({
     if (created) {
       setInlineChapter(null);
     }
-  }, [inlineChapter, onCreateChapter, slot]);
+  }, [inlineChapter, onCreateChapter, setInlineChapter, slot]);
 
   const handleCanvasDoubleClick = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
@@ -490,32 +490,30 @@ export const TreeCanvas = ({
                                 return (
                                   <li
                                     key={problemKey}
-                                    className="flex items-center justify-between gap-2 rounded-lg border border-zinc-100 bg-zinc-50 px-2 py-1"
+                                    className="rounded-lg border border-zinc-100 bg-zinc-50 px-2 py-1"
                                   >
                                     <div className="min-w-0">
-                                      <p className="truncate text-[11px] font-semibold text-zinc-800">
-                                        {problem.content?.title ??
-                                          "Untitled problem"}
-                                      </p>
+                                      {problemHref ? (
+                                        <Link
+                                          className="block truncate text-[11px] font-semibold text-zinc-800 underline"
+                                          href={problemHref}
+                                          onClick={(event) =>
+                                            event.stopPropagation()
+                                          }
+                                        >
+                                          {problem.content?.title ??
+                                            "Untitled problem"}
+                                        </Link>
+                                      ) : (
+                                        <p className="truncate text-[11px] font-semibold text-zinc-800">
+                                          {problem.content?.title ??
+                                            "Untitled problem"}
+                                        </p>
+                                      )}
                                       <p className="text-[10px] text-zinc-500">
                                         id: {problem.id ?? "-"}
                                       </p>
                                     </div>
-                                    {problemHref ? (
-                                      <Link
-                                        className="rounded border border-zinc-200 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 hover:bg-white"
-                                        href={problemHref}
-                                        onClick={(event) =>
-                                          event.stopPropagation()
-                                        }
-                                      >
-                                        Open
-                                      </Link>
-                                    ) : (
-                                      <span className="text-[10px] text-zinc-400">
-                                        No ID
-                                      </span>
-                                    )}
                                   </li>
                                 );
                               })}
