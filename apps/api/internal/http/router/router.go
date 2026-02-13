@@ -41,9 +41,9 @@ func NewRouterWithUsecases(log *logger.Logger, bookUsecase *usecase.BookUsecase,
 	problemHandler := handler.NewProblemHandler(problemUsecase)
 	var importHandler *handler.ImportHandler
 	if len(importUsecase) > 0 {
-		importHandler = handler.NewImportHandler(importUsecase[0])
+		importHandler = handler.NewImportHandler(importUsecase[0], log)
 	} else {
-		importHandler = handler.NewImportHandler(nil)
+		importHandler = handler.NewImportHandler(nil, log)
 	}
 
 	r.Route("/api/v1", func(r chi.Router) {

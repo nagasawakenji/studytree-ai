@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/nagasawakenji/studytree-ai/apps/api/internal/observability/logger"
+	"github.com/nagasawakenji/studytree-ai/apps/api/internal/observability/request_id"
 	"github.com/nagasawakenji/studytree-ai/apps/api/internal/usecase"
 )
 
@@ -18,7 +19,6 @@ const defaultOpenAIModel = "gpt-4.1-mini"
 
 var (
 	errMissingAPIKey = errors.New("missing openai api key")
-	errInvalidJSON   = errors.New("openai returned invalid json")
 )
 
 // OpenAIClient generates import plans using OpenAI Chat Completions API.
@@ -114,11 +114,12 @@ func (c *OpenAIClient) GenerateImportPlan(ctx context.Context, req usecase.Impor
 	if err := json.Unmarshal([]byte(content), &plan); err != nil {
 		if c.log != nil {
 			c.log.Error("openai import response json parse failed", map[string]any{
-				"raw_response": truncate([]byte(content), 2000),
+				"request_id":   request_id.FromContext(ctx),
+				"raw_response": truncate([]byte(content), 1000),
 				"error":        err.Error(),
 			})
 		}
-		return usecase.ImportPlan{}, fmt.Errorf("%w: %v", errInvalidJSON, err)
+		return usecase.ImportPlan{}, fmt.Errorf("%w: %v", usecase.ErrImportInvalidJSONFromLLM, err)
 	}
 
 	return plan, nil
