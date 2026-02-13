@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -25,8 +25,7 @@ const pickString = (value: unknown): string | null => {
 
 export default function ProblemDetailPage({ params }: PageProps) {
   const router = useRouter();
-  const resolvedParams = use(params);
-  const problemId = resolvedParams?.problemId;
+  const { problemId } = React.use(params);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
