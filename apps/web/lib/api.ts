@@ -43,12 +43,43 @@ export type CreateImportRequest = {
 
 export type CreateImportResponse = {
   book_id: number;
-  created: {
+  request_id: string;
+  created_counts: {
+    books: number;
     nodes: number;
     problems: number;
     summaries: number;
   };
+  filtered_counts: {
+    summaries_invalid: number;
+    problems_invalid: number;
+  };
 };
+
+export type ImportErrorResponse = {
+  error: string;
+  reason?: string;
+  request_id?: string;
+};
+
+export class ImportApiError extends Error {
+  status: number;
+  reason?: string;
+  requestId?: string;
+
+  constructor(params: {
+    status: number;
+    message: string;
+    reason?: string;
+    requestId?: string;
+  }) {
+    super(params.message);
+    this.name = "ImportApiError";
+    this.status = params.status;
+    this.reason = params.reason;
+    this.requestId = params.requestId;
+  }
+}
 
 const API_PREFIX = "/api/v1";
 
@@ -352,8 +383,19 @@ export async function createImport(
   });
 
   if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Request failed: ${response.status} ${text}`);
+    let parsed: ImportErrorResponse | null = null;
+    try {
+      parsed = (await response.json()) as ImportErrorResponse;
+    } catch {
+      // ignore parse error and fallback to status-only message
+    }
+    throw new ImportApiError({
+      status: response.status,
+      message: parsed?.error ?? "failed to import",
+      reason: parsed?.reason,
+      requestId:
+        parsed?.request_id ?? response.headers.get("X-Request-Id") ?? undefined,
+    });
   }
 
   return (await response.json()) as CreateImportResponse;

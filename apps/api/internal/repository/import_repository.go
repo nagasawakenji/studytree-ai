@@ -106,6 +106,7 @@ func (r *ImportRepository) SaveImportPlan(ctx context.Context, userID string, pl
 	return usecase.ImportResult{
 		BookID: bookID,
 		Created: usecase.ImportCreated{
+			Books:     1,
 			Nodes:     len(nodeIDByTmp),
 			Problems:  createdProblems,
 			Summaries: createdSummaries,

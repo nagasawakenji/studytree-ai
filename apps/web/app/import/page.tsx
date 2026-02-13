@@ -1,30 +1,35 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { createImport } from "@/lib/api";
+import { createImport, ImportApiError, type CreateImportResponse } from "@/lib/api";
 
 export default function ImportPage() {
-  const router = useRouter();
   const [bookTitle, setBookTitle] = useState("");
   const [sourceText, setSourceText] = useState("");
   const [maxDepth, setMaxDepth] = useState(3);
   const [problemsPerLeaf, setProblemsPerLeaf] = useState(3);
   const [language, setLanguage] = useState("ja");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<CreateImportResponse | null>(null);
+  const [error, setError] = useState<{
+    status?: number;
+    message: string;
+    reason?: string;
+    requestId?: string;
+  } | null>(null);
 
   const onGenerate = async () => {
     if (!bookTitle.trim() || !sourceText.trim()) {
-      setError("book title and source text are required");
+      setError({ message: "book title and source text are required" });
       return;
     }
     setLoading(true);
+    setResult(null);
     setError(null);
     try {
-      const result = await createImport({
+      const next = await createImport({
         book_title: bookTitle.trim(),
         source_text: sourceText.trim(),
         options: {
@@ -33,9 +38,20 @@ export default function ImportPage() {
           language: language.trim() || "ja",
         },
       });
-      router.push(`/?book_id=${result.book_id}`);
+      setResult(next);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "failed to import");
+      if (err instanceof ImportApiError) {
+        setError({
+          status: err.status,
+          message: err.message,
+          reason: err.reason,
+          requestId: err.requestId,
+        });
+      } else {
+        setError({
+          message: err instanceof Error ? err.message : "failed to import",
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -111,14 +127,58 @@ export default function ImportPage() {
               </label>
             </div>
 
-            {error ? <p className="text-sm text-red-600">{error}</p> : null}
+            {error ? (
+              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                <p className="font-medium">Import failed</p>
+                {error.status !== undefined ? <p>HTTP status: {error.status}</p> : null}
+                <p>Error: {error.message}</p>
+                {error.reason ? <p>Reason: {error.reason}</p> : null}
+                {error.requestId ? <p>Request ID: {error.requestId}</p> : null}
+              </div>
+            ) : null}
+
+            {result ? (
+              <div className="space-y-3">
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                  <p className="font-medium">Import completed</p>
+                  <p>Book ID: {result.book_id}</p>
+                  <p>Request ID: {result.request_id}</p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-md border border-zinc-200 bg-white p-3 text-sm">
+                    <p className="mb-2 font-medium text-zinc-900">Created</p>
+                    <p>Books: {result.created_counts.books}</p>
+                    <p>Nodes: {result.created_counts.nodes}</p>
+                    <p>Summaries: {result.created_counts.summaries}</p>
+                    <p>Problems: {result.created_counts.problems}</p>
+                  </div>
+                  <div className="rounded-md border border-zinc-200 bg-white p-3 text-sm">
+                    <p className="mb-2 font-medium text-zinc-900">Filtered</p>
+                    <p>Summaries invalid: {result.filtered_counts.summaries_invalid}</p>
+                    <p>Problems invalid: {result.filtered_counts.problems_invalid}</p>
+                  </div>
+                </div>
+                <Link
+                  className="inline-flex rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white"
+                  href={`/?book_id=${result.book_id}`}
+                >
+                  Open book
+                </Link>
+              </div>
+            ) : null}
 
             <button
-              className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
+              className="inline-flex items-center gap-2 rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
               onClick={() => void onGenerate()}
               disabled={loading}
               type="button"
             >
+              {loading ? (
+                <span
+                  aria-hidden
+                  className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
+                />
+              ) : null}
               {loading ? "Generating..." : "Generate"}
             </button>
           </div>

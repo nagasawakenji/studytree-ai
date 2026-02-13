@@ -15,6 +15,8 @@ var (
 	ErrImportInvalidRequest = errors.New("invalid import request")
 	// ErrImportInvalidPlan indicates generated import JSON is invalid.
 	ErrImportInvalidPlan = errors.New("invalid import plan")
+	// ErrImportInvalidJSONFromLLM indicates the provider returned an invalid JSON payload.
+	ErrImportInvalidJSONFromLLM = errors.New("invalid json from llm")
 	// ErrImportProvider indicates an upstream LLM/provider error.
 	ErrImportProvider = errors.New("import provider error")
 )
@@ -71,15 +73,23 @@ type ImportPlanProblem struct {
 
 // ImportResult is the import API response payload.
 type ImportResult struct {
-	BookID  int64
-	Created ImportCreated
+	BookID   int64
+	Created  ImportCreated
+	Filtered ImportFiltered
 }
 
 // ImportCreated tracks inserted row counts.
 type ImportCreated struct {
+	Books     int
 	Nodes     int
 	Problems  int
 	Summaries int
+}
+
+// ImportFiltered tracks rows dropped during normalization.
+type ImportFiltered struct {
+	SummariesInvalid int
+	ProblemsInvalid  int
 }
 
 // ImportPlanGenerator asks an LLM to generate an ImportPlan.
@@ -126,6 +136,9 @@ func (u *ImportUsecase) ImportFromChatGPT(ctx context.Context, req ImportRequest
 
 	plan, err := u.planner.GenerateImportPlan(ctx, req)
 	if err != nil {
+		if errors.Is(err, ErrImportInvalidJSONFromLLM) {
+			return ImportResult{}, err
+		}
 		return ImportResult{}, fmt.Errorf("%w: %v", ErrImportProvider, err)
 	}
 
@@ -133,22 +146,29 @@ func (u *ImportUsecase) ImportFromChatGPT(ctx context.Context, req ImportRequest
 		plan.Book.Title = strings.TrimSpace(req.BookTitle)
 	}
 
-	if err := validateAndNormalizeImportPlan(&plan); err != nil {
+	filteredCounts, err := validateAndNormalizeImportPlan(&plan)
+	if err != nil {
 		return ImportResult{}, fmt.Errorf("%w: %v", ErrImportInvalidPlan, err)
 	}
 
-	return u.repo.SaveImportPlan(ctx, localUserID, plan)
+	result, err := u.repo.SaveImportPlan(ctx, localUserID, plan)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	result.Filtered = filteredCounts
+	return result, nil
 }
 
-func validateAndNormalizeImportPlan(plan *ImportPlan) error {
+func validateAndNormalizeImportPlan(plan *ImportPlan) (ImportFiltered, error) {
+	filtered := ImportFiltered{}
 	if plan == nil {
-		return errors.New("empty plan")
+		return filtered, errors.New("empty plan")
 	}
 	if strings.TrimSpace(plan.Book.Title) == "" {
-		return errors.New("book.title is required")
+		return filtered, errors.New("book.title is required")
 	}
 	if len(plan.Nodes) == 0 {
-		return errors.New("nodes is required")
+		return filtered, errors.New("nodes is required")
 	}
 
 	nodeByTmp := make(map[string]ImportPlanNode, len(plan.Nodes))
@@ -162,16 +182,16 @@ func validateAndNormalizeImportPlan(plan *ImportPlan) error {
 		}
 
 		if strings.TrimSpace(node.TmpID) == "" {
-			return errors.New("node.tmp_id is required")
+			return filtered, errors.New("node.tmp_id is required")
 		}
 		if strings.TrimSpace(node.Title) == "" {
-			return fmt.Errorf("node.title is required: %s", node.TmpID)
+			return filtered, fmt.Errorf("node.title is required: %s", node.TmpID)
 		}
 		if node.ParentTmpID != nil && strings.TrimSpace(*node.ParentTmpID) == node.TmpID {
-			return fmt.Errorf("node parent cannot be self: %s", node.TmpID)
+			return filtered, fmt.Errorf("node parent cannot be self: %s", node.TmpID)
 		}
 		if _, exists := nodeByTmp[node.TmpID]; exists {
-			return fmt.Errorf("duplicate node.tmp_id: %s", node.TmpID)
+			return filtered, fmt.Errorf("duplicate node.tmp_id: %s", node.TmpID)
 		}
 		nodeByTmp[node.TmpID] = *node
 	}
@@ -182,10 +202,10 @@ func validateAndNormalizeImportPlan(plan *ImportPlan) error {
 		}
 		parent := strings.TrimSpace(*node.ParentTmpID)
 		if parent == "" {
-			return fmt.Errorf("parent_tmp_id is empty: %s", node.TmpID)
+			return filtered, fmt.Errorf("parent_tmp_id is empty: %s", node.TmpID)
 		}
 		if _, ok := nodeByTmp[parent]; !ok {
-			return fmt.Errorf("unknown parent_tmp_id: %s", parent)
+			return filtered, fmt.Errorf("unknown parent_tmp_id: %s", parent)
 		}
 	}
 
@@ -210,7 +230,7 @@ func validateAndNormalizeImportPlan(plan *ImportPlan) error {
 	}
 	for _, node := range plan.Nodes {
 		if err := visit(node.TmpID); err != nil {
-			return err
+			return filtered, err
 		}
 	}
 
@@ -218,14 +238,16 @@ func validateAndNormalizeImportPlan(plan *ImportPlan) error {
 	for _, summary := range plan.Summaries {
 		summary.NodeTmpID = strings.TrimSpace(summary.NodeTmpID)
 		if _, ok := nodeByTmp[summary.NodeTmpID]; !ok {
-			return fmt.Errorf("unknown summaries.node_tmp_id: %s", summary.NodeTmpID)
+			return filtered, fmt.Errorf("unknown summaries.node_tmp_id: %s", summary.NodeTmpID)
 		}
 		if hasValidSummaryContent(summary.Content) {
 			if summary.SchemaVer <= 0 {
 				summary.SchemaVer = 1
 			}
 			filteredSummaries = append(filteredSummaries, summary)
+			continue
 		}
+		filtered.SummariesInvalid++
 	}
 	plan.Summaries = filteredSummaries
 
@@ -233,10 +255,11 @@ func validateAndNormalizeImportPlan(plan *ImportPlan) error {
 	for _, problem := range plan.Problems {
 		problem.NodeTmpID = strings.TrimSpace(problem.NodeTmpID)
 		if _, ok := nodeByTmp[problem.NodeTmpID]; !ok {
-			return fmt.Errorf("unknown problems.node_tmp_id: %s", problem.NodeTmpID)
+			return filtered, fmt.Errorf("unknown problems.node_tmp_id: %s", problem.NodeTmpID)
 		}
 		normalizedContent, ok := normalizeProblemContent(problem.Content)
 		if !ok {
+			filtered.ProblemsInvalid++
 			continue
 		}
 		problem.Content = normalizedContent
@@ -250,7 +273,7 @@ func validateAndNormalizeImportPlan(plan *ImportPlan) error {
 	}
 	plan.Problems = filteredProblems
 
-	return nil
+	return filtered, nil
 }
 
 func hasValidSummaryContent(raw json.RawMessage) bool {
