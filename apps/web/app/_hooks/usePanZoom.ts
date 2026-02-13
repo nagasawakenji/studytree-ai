@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type MouseEvent, type WheelEvent } from "react";
 
-import type { Viewport } from "../_types";
+import type { Viewport } from "@/app/_types";
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));

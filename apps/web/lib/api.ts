@@ -223,10 +223,15 @@ export async function createProblem(
   payload: {
     kind?: string;
     title: string;
+    body_md?: string;
+    answer_md?: string;
     bodyMd?: string;
     answerMd?: string;
   },
 ): Promise<Problem> {
+  const bodyMd = payload.body_md ?? payload.bodyMd ?? "";
+  const answerMd = payload.answer_md ?? payload.answerMd ?? "";
+
   const response = await fetch(`${API_PREFIX}/nodes/${nodeId}/problems`, {
     method: "POST",
     headers: {
@@ -237,8 +242,8 @@ export async function createProblem(
       kind: payload.kind ?? "qa",
       content: {
         title: payload.title,
-        body_md: payload.bodyMd ?? "",
-        answer_md: payload.answerMd ?? "",
+        body_md: bodyMd,
+        answer_md: answerMd,
       },
     }),
   });

@@ -1,7 +1,7 @@
 import { useCallback, useState, type DragEvent } from "react";
 
-import { moveSubtree } from "../../lib/api";
-import type { DragPayload, Slot } from "../_types";
+import { moveSubtree } from "@/lib/api";
+import type { DragPayload, Slot } from "@/app/_types";
 
 type UseNodeDndParams = {
   primaryBookId: string | number | null;

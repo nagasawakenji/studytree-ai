@@ -1,11 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 
-import { getProblem, type Problem } from "../../../lib/api";
-import { MarkdownContent } from "../../../lib/markdown";
+import { getProblem, type Problem } from "@/lib/api";
+import { MarkdownContent } from "@/lib/markdown";
+
+type PageProps = {
+  params: Promise<{
+    problemId: string;
+  }>;
+};
 
 type ContentShape = Record<string, unknown>;
 
@@ -17,10 +23,10 @@ const pickString = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
-export default function ProblemDetailPage() {
+export default function ProblemDetailPage({ params }: PageProps) {
   const router = useRouter();
-  const params = useParams<{ problemId: string }>();
-  const problemId = params?.problemId;
+  const resolvedParams = use(params);
+  const problemId = resolvedParams?.problemId;
   const [problem, setProblem] = useState<Problem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +35,7 @@ export default function ProblemDetailPage() {
   useEffect(() => {
     let cancelled = false;
     if (!problemId) {
-      setError("Problem id is missing.");
+      setError("Problem ID is missing.");
       setLoading(false);
       return;
     }
@@ -44,7 +50,7 @@ export default function ProblemDetailPage() {
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load problem");
+          setError(err instanceof Error ? err.message : "Failed to load problem.");
         }
       } finally {
         if (!cancelled) {

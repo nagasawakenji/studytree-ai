@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 
-import { listProblems, type Problem } from "../../lib/api";
-import type { Slot } from "../_types";
+import { listProblems, type Problem } from "@/lib/api";
+import type { Slot } from "@/app/_types";
 
 const PROBLEMS_HEADER_HEIGHT = 28;
 const PROBLEM_ROW_HEIGHT = 32;
