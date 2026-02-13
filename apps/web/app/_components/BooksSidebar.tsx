@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import type { Book } from "@/lib/api";
@@ -152,6 +153,13 @@ export const BooksSidebar = ({
           {booksLoading ? "Creating..." : "Create"}
         </button>
       </div>
+
+      <Link
+        className="mt-4 rounded-md border border-zinc-700 px-3 py-2 text-center text-sm text-zinc-200 hover:bg-zinc-800"
+        href="/import"
+      >
+        Open Import
+      </Link>
 
       <div className="mt-6 space-y-2 text-xs text-zinc-400">
         <p>

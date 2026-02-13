@@ -5,14 +5,16 @@ import type { Slot } from "@/app/_types";
 
 export const useBookNodes = (params?: {
   onClearSlot?: (slot: Slot) => void;
+  initialPrimaryBookId?: string | number | null;
+  initialSecondaryBookId?: string | number | null;
 }) => {
-  const { onClearSlot } = params ?? {};
+  const { onClearSlot, initialPrimaryBookId = null, initialSecondaryBookId = null } = params ?? {};
   const [primaryBookId, setPrimaryBookId] = useState<string | number | null>(
-    null,
+    initialPrimaryBookId,
   );
   const [secondaryBookId, setSecondaryBookId] = useState<
     string | number | null
-  >(null);
+  >(initialSecondaryBookId);
   const [primaryNodes, setPrimaryNodes] = useState<BookNode[]>([]);
   const [primaryNodesLoading, setPrimaryNodesLoading] = useState(false);
   const [primaryNodesError, setPrimaryNodesError] = useState<string | null>(null);
