@@ -1,10 +1,22 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { ReactNode } from "react";
 
 type MarkdownContentProps = {
   content: string;
   className?: string;
   tone?: "default" | "answer";
+};
+
+type AnchorRendererProps = {
+  href?: string;
+  children?: ReactNode;
+};
+
+type CodeRendererProps = {
+  inline?: boolean;
+  className?: string;
+  children?: ReactNode;
 };
 
 export function MarkdownContent({
@@ -50,7 +62,7 @@ export function MarkdownContent({
               {children}
             </ol>
           ),
-          a: ({ href, children }) => (
+          a: ({ href, children }: AnchorRendererProps) => (
             <a
               className="text-indigo-600 underline underline-offset-2 hover:text-indigo-500"
               href={href ?? "#"}
@@ -60,7 +72,7 @@ export function MarkdownContent({
               {children}
             </a>
           ),
-          code: ({ inline, children }) =>
+          code: ({ inline, children }: CodeRendererProps) =>
             inline ? (
               <code className="rounded bg-zinc-200/70 px-1 py-0.5 font-mono text-[0.85em] text-zinc-900">
                 {children}
