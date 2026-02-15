@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState, type MouseEvent, type WheelEvent } from "react";
+import { useCallback, useRef, useState, type WheelEvent } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 
 import type { Viewport } from "@/app/_types";
 
@@ -19,7 +20,7 @@ export const usePanZoom = () => {
   } | null>(null);
 
   const onMouseDown = useCallback(
-    (event: MouseEvent<HTMLDivElement>) => {
+    (event: ReactMouseEvent<HTMLDivElement>) => {
       if (event.button !== 0) {
         return;
       }
@@ -33,7 +34,7 @@ export const usePanZoom = () => {
         baseX: viewport.x,
         baseY: viewport.y,
       };
-      const handleMove = (moveEvent: MouseEvent) => {
+      const handleMove = (moveEvent: globalThis.MouseEvent) => {
         if (!panRef.current) {
           return;
         }
